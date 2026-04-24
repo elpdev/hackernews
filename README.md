@@ -28,10 +28,12 @@ The app uses the official Hacker News Firebase API for story and comment data. A
 - Optional browser opener support: `xdg-open` on Linux, `open` on macOS, or the Windows URL handler.
 - Optional clipboard support: `wl-copy`, `xclip`, or `xsel` on Linux; `pbcopy` on macOS; `clip` on Windows.
 
-Install Trafilatura with:
+Install Trafilatura as either a Python package or a command-line tool:
 
 ```sh
 python3 -m pip install trafilatura
+# or
+brew install trafilatura
 ```
 
 ## Install
@@ -209,4 +211,4 @@ The publish workflow can also create a version tag, run GoReleaser, and publish 
 
 ## Notes
 
-Article extraction runs through an embedded Python helper script and requires the `python3` interpreter used by the app to have the `trafilatura` package installed.
+Article extraction first tries the `trafilatura` Python package through `python3`, then falls back to the `trafilatura` command-line tool. This supports both `python3 -m pip install trafilatura` and `brew install trafilatura` setups.
