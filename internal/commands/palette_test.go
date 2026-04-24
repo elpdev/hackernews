@@ -57,6 +57,16 @@ func TestPaletteQuerySearchesNestedCommands(t *testing.T) {
 	}
 }
 
+func TestPaletteCommandLinesAreTruncatedForSelectionPadding(t *testing.T) {
+	line := truncatePaletteLine("Sync Now           Manually sync saved and read articles", paletteSelectedContentWidth)
+	if len([]rune(line)) > paletteSelectedContentWidth {
+		t.Fatalf("expected line width <= %d, got %d", paletteSelectedContentWidth, len([]rune(line)))
+	}
+	if line == "Sync Now           Manually sync saved and read articles" {
+		t.Fatal("expected long command line to be truncated")
+	}
+}
+
 func testPalette() PaletteModel {
 	registry := NewRegistry()
 	registry.Register(Command{ID: "browse", Title: "Browse", Description: "Feeds and story lists", Order: 10})

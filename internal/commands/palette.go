@@ -30,6 +30,12 @@ const (
 	paletteSyncSetup
 )
 
+const (
+	paletteModalWidth           = 62
+	paletteContentWidth         = 56
+	paletteSelectedContentWidth = 54
+)
+
 type SyncSetup struct {
 	Remote string
 	Branch string
@@ -229,21 +235,41 @@ func (m PaletteModel) View(t theme.Theme) string {
 		b.WriteString(t.Muted.Render("No commands found"))
 	} else {
 		for i, command := range matches {
-			title := command.Title
-			if m.registry.HasChildren(command.ID) {
-				title += " ›"
-			}
-			line := fmt.Sprintf("%-18s %s", title, command.Description)
+			line := m.commandLine(command)
 			if i == m.selected {
+				line = truncatePaletteLine(line, paletteSelectedContentWidth)
 				line = t.Selected.Render(line)
 			} else {
+				line = truncatePaletteLine(line, paletteContentWidth)
 				line = t.Text.Render(line)
 			}
 			b.WriteString(line + "\n")
 		}
 	}
 
-	return t.Modal.Width(62).Render(b.String())
+	return t.Modal.Width(paletteModalWidth).Render(b.String())
+}
+
+func (m PaletteModel) commandLine(command Command) string {
+	title := command.Title
+	if m.registry.HasChildren(command.ID) {
+		title += " ›"
+	}
+	return fmt.Sprintf("%-18s %s", title, command.Description)
+}
+
+func truncatePaletteLine(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	runes := []rune(line)
+	if len(runes) <= width {
+		return line
+	}
+	if width <= 3 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-3]) + "..."
 }
 
 func (m PaletteModel) themeView(t theme.Theme) string {
