@@ -158,9 +158,9 @@ func (m *Model) refreshScreenOrder() {
 
 func (m *Model) registerCommands() {
 	m.commands.Register(commands.Command{ID: "browse", Title: "Browse", Description: "Feeds and story lists", Keywords: []string{"feed", "stories", "hacker news"}, Order: 10})
-	m.commands.Register(commands.Command{ID: "library", Title: "Library", Description: "Saved articles and loaded-story search", Keywords: []string{"saved", "search", "articles"}, Order: 20})
-	m.commands.Register(commands.Command{ID: "view", Title: "View", Description: "Layout and reading display options", Keywords: []string{"layout", "sidebar", "read"}, Order: 30})
-	m.commands.Register(commands.Command{ID: "settings", Title: "Settings", Description: "App preferences and configuration", Keywords: []string{"config", "preferences", "options"}, Order: 35})
+	m.commands.Register(commands.Command{ID: "library", Title: "Library", Description: "Saved articles and search", Keywords: []string{"saved", "search", "articles"}, Order: 20})
+	m.commands.Register(commands.Command{ID: "view", Title: "View", Description: "Layout and reading options", Keywords: []string{"layout", "sidebar", "read"}, Order: 30})
+	m.commands.Register(commands.Command{ID: "settings", Title: "Settings", Description: "App preferences", Keywords: []string{"config", "preferences", "options"}, Order: 35})
 	m.commands.Register(commands.Command{ID: "sync", Title: "Sync", Description: "Git sync actions and setup", Keywords: []string{"git", "remote", "backup"}, Order: 40})
 	m.commands.Register(commands.Command{ID: "appearance", Title: "Appearance", Description: "Themes and visual settings", Keywords: []string{"theme", "colors"}, Order: 50})
 	m.commands.Register(commands.Command{ID: "system", Title: "System", Description: "App-level actions", Keywords: []string{"quit", "exit"}, Order: 60})

@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestPaletteRootShowsCategoriesOnly(t *testing.T) {
@@ -54,6 +56,39 @@ func TestPaletteQuerySearchesNestedCommands(t *testing.T) {
 	}
 	if matches[0].ID != "themes" {
 		t.Fatalf("expected nested themes command, got %q", matches[0].ID)
+	}
+}
+
+func TestPaletteCommandLineFitsSelectionWidth(t *testing.T) {
+	model := testPalette()
+	line := model.commandLine(Command{ID: "library", Title: "Library", Description: "Saved articles and search"}, paletteSelectedContentWidth)
+	if lipgloss.Width(line) > paletteSelectedContentWidth {
+		t.Fatalf("expected line width <= %d, got %d for %q", paletteSelectedContentWidth, lipgloss.Width(line), line)
+	}
+	if strings.Contains(line, "...") {
+		t.Fatalf("did not expect normal command line to be truncated, got %q", line)
+	}
+}
+
+func TestPaletteCommandLineFitsNestedCommandSelectionWidth(t *testing.T) {
+	model := testPalette()
+	line := model.commandLine(Command{ID: "sync-now", Title: "Sync Now", Description: "Manually sync saved and read articles"}, paletteSelectedContentWidth)
+	if lipgloss.Width(line) > paletteSelectedContentWidth {
+		t.Fatalf("expected line width <= %d, got %d for %q", paletteSelectedContentWidth, lipgloss.Width(line), line)
+	}
+	if strings.Contains(line, "...") {
+		t.Fatalf("did not expect normal command line to be truncated, got %q", line)
+	}
+}
+
+func TestPaletteCommandLineTruncatesOnlyWhenNeeded(t *testing.T) {
+	model := testPalette()
+	line := model.commandLine(Command{ID: "long", Title: "Long Command", Description: strings.Repeat("very long ", 20)}, paletteSelectedContentWidth)
+	if lipgloss.Width(line) > paletteSelectedContentWidth {
+		t.Fatalf("expected line width <= %d, got %d for %q", paletteSelectedContentWidth, lipgloss.Width(line), line)
+	}
+	if !strings.Contains(line, "...") {
+		t.Fatalf("expected truly long command line to be truncated, got %q", line)
 	}
 }
 

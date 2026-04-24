@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/elpdev/hackernews/internal/theme"
 )
 
@@ -28,6 +29,13 @@ const (
 	paletteRoot palettePage = iota
 	paletteThemes
 	paletteSyncSetup
+)
+
+const (
+	paletteModalWidth           = 86
+	paletteTitleWidth           = 18
+	paletteContentWidth         = 80
+	paletteSelectedContentWidth = 78
 )
 
 type SyncSetup struct {
@@ -229,21 +237,58 @@ func (m PaletteModel) View(t theme.Theme) string {
 		b.WriteString(t.Muted.Render("No commands found"))
 	} else {
 		for i, command := range matches {
-			title := command.Title
-			if m.registry.HasChildren(command.ID) {
-				title += " ›"
-			}
-			line := fmt.Sprintf("%-18s %s", title, command.Description)
 			if i == m.selected {
+				line := m.commandLine(command, paletteSelectedContentWidth)
 				line = t.Selected.Render(line)
+				b.WriteString(line + "\n")
 			} else {
+				line := m.commandLine(command, paletteContentWidth)
 				line = t.Text.Render(line)
+				b.WriteString(line + "\n")
 			}
-			b.WriteString(line + "\n")
 		}
 	}
 
-	return t.Modal.Width(62).Render(b.String())
+	return t.Modal.Width(paletteModalWidth).Render(b.String())
+}
+
+func (m PaletteModel) commandLine(command Command, width int) string {
+	title := command.Title
+	if m.registry.HasChildren(command.ID) {
+		title += " ›"
+	}
+	if width <= paletteTitleWidth {
+		return truncatePaletteLine(title, width)
+	}
+	descriptionWidth := width - paletteTitleWidth - 1
+	return fmt.Sprintf("%-*s %s", paletteTitleWidth, truncatePaletteLine(title, paletteTitleWidth), truncatePaletteLine(command.Description, descriptionWidth))
+}
+
+func truncatePaletteLine(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(line) <= width {
+		return line
+	}
+	if width <= 3 {
+		return takePaletteWidth(line, width)
+	}
+	return takePaletteWidth(line, width-3) + "..."
+}
+
+func takePaletteWidth(line string, width int) string {
+	var b strings.Builder
+	used := 0
+	for _, r := range line {
+		w := lipgloss.Width(string(r))
+		if used+w > width {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	return b.String()
 }
 
 func (m PaletteModel) themeView(t theme.Theme) string {
