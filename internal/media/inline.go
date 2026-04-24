@@ -61,6 +61,9 @@ func RenderBytes(data []byte, maxCols int) (string, int, error) {
 	seq = wrapPassthrough(seq)
 	lines := make([]string, rows)
 	lines[0] = seq
+	for i := 1; i < rows; i++ {
+		lines[i] = " "
+	}
 	return strings.Join(lines, "\n"), rows, nil
 }
 
@@ -86,7 +89,7 @@ func renderBytes(data []byte, maxCols, rows int, protocol Protocol) (string, err
 }
 
 func renderKitty(data []byte, maxCols, rows int) (string, error) {
-	payload, err := kittyPayload(data)
+	payload, err := kittyPayload(data, maxCols, rows)
 	if err != nil {
 		return "", err
 	}
@@ -123,15 +126,7 @@ func renderSixel(data []byte, maxCols, rows int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decode image: %w", err)
 	}
-	width := maxCols * 8
-	if width > 384 {
-		width = 384
-	}
-	height := rows * 16
-	if height > 288 {
-		height = 288
-	}
-	img = resizeImage(img, width, height)
+	img = resizeImage(img, imagePixelWidth(maxCols), imagePixelHeight(rows))
 	var payload bytes.Buffer
 	if err := (&sixel.Encoder{}).Encode(&payload, img); err != nil {
 		return "", fmt.Errorf("encode sixel: %w", err)
@@ -139,11 +134,12 @@ func renderSixel(data []byte, maxCols, rows int) (string, error) {
 	return ansi.SixelGraphics(1, 1, 0, payload.Bytes()), nil
 }
 
-func kittyPayload(data []byte) ([]byte, error) {
+func kittyPayload(data []byte, maxCols, rows int) ([]byte, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decode image: %w", err)
 	}
+	img = resizeImage(img, imagePixelWidth(maxCols), imagePixelHeight(rows))
 	var b bytes.Buffer
 	if err := png.Encode(&b, img); err != nil {
 		return nil, fmt.Errorf("encode kitty payload as png: %w", err)
@@ -167,6 +163,22 @@ func resizeImage(img image.Image, maxWidth, maxHeight int) image.Image {
 	dst := image.NewRGBA(image.Rect(0, 0, dstWidth, dstHeight))
 	xdraw.NearestNeighbor.Scale(dst, dst.Bounds(), img, bounds, xdraw.Over, nil)
 	return dst
+}
+
+func imagePixelWidth(cols int) int {
+	width := cols * 8
+	if width > 384 {
+		return 384
+	}
+	return width
+}
+
+func imagePixelHeight(rows int) int {
+	height := rows * 16
+	if height > 288 {
+		return 288
+	}
+	return height
 }
 
 func wrapPassthrough(seq string) string {

@@ -154,7 +154,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if capturer, ok := active.(screens.KeyCapturer); ok && capturer.CapturesKey(msg) {
 		updated, cmd := active.Update(msg)
 		m.screens[m.activeScreen] = updated
-		return m, cmd
+		return m, tea.Batch(cmd, m.inlineMediaCmdIfChanged())
 	}
 
 	switch {
@@ -170,7 +170,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		active := m.screens[m.activeScreen]
 		updated, cmd := active.Update(msg)
 		m.screens[m.activeScreen] = updated
-		return m, cmd
+		return m, tea.Batch(cmd, m.inlineMediaCmdIfChanged())
 	case key.Matches(msg, m.keys.Focus):
 		if m.focus == FocusMain && m.showSidebar {
 			m.focus = FocusSidebar
@@ -189,7 +189,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	active = m.screens[m.activeScreen]
 	updated, cmd := active.Update(msg)
 	m.screens[m.activeScreen] = updated
-	return m, cmd
+	return m, tea.Batch(cmd, m.inlineMediaCmdIfChanged())
 }
 
 func (m Model) handlePaletteAction(action commands.PaletteAction) (tea.Model, tea.Cmd) {
@@ -326,7 +326,35 @@ func (m Model) updateScreen(id string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	updated, cmd := active.Update(msg)
 	m.screens[id] = updated
+	if id == m.activeScreen {
+		return m, tea.Batch(cmd, m.inlineMediaCmd())
+	}
 	return m, cmd
+}
+
+func (m *Model) inlineMediaCmdIfChanged() tea.Cmd {
+	seq := m.inlineMediaSequence()
+	if seq == "" || seq == m.inlineMediaSeq {
+		return nil
+	}
+	m.inlineMediaSeq = seq
+	return tea.Raw(seq)
+}
+
+func (m *Model) inlineMediaCmd() tea.Cmd {
+	seq := m.inlineMediaSequence()
+	m.inlineMediaSeq = seq
+	if seq == "" {
+		return nil
+	}
+	return tea.Raw(seq)
+}
+
+func (m Model) inlineMediaSequence() string {
+	if m.width <= 0 || m.height <= 0 {
+		return ""
+	}
+	return screens.InlineMediaSequence(m.viewString())
 }
 
 func (m Model) initScreenIfNeeded(id string) tea.Cmd {

@@ -110,7 +110,7 @@ func trafilaturaCommandArgs(script, url string) []string {
 }
 
 func trafilaturaCLIArgs(url string) []string {
-	return []string{"--markdown", "--no-comments", "--no-tables", "-u", url}
+	return []string{"--markdown", "--images", "--no-comments", "--no-tables", "-u", url}
 }
 
 func missingPythonTrafilatura(err error) bool {

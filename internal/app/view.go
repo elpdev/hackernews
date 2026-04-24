@@ -3,21 +3,28 @@ package app
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/elpdev/hackernews/internal/components/footer"
 	"github.com/elpdev/hackernews/internal/components/header"
 	"github.com/elpdev/hackernews/internal/components/modal"
 	"github.com/elpdev/hackernews/internal/components/sidebar"
 	"github.com/elpdev/hackernews/internal/layout"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/bubbles/key"
 )
 
 func (m Model) View() tea.View {
 	if m.width <= 0 || m.height <= 0 {
 		return tea.NewView("initializing...")
 	}
+	view := m.viewString()
+	rendered := tea.NewView(view)
+	rendered.AltScreen = true
+	rendered.BackgroundColor = m.theme.Background
+	return rendered
+}
 
+func (m Model) viewString() string {
 	dims := layout.Calculate(m.width, m.height, m.showSidebar)
 	active := m.screens[m.activeScreen]
 
@@ -44,10 +51,7 @@ func (m Model) View() tea.View {
 		view = modal.Overlay(view, m.commandPalette.View(m.theme), m.width, m.height, m.theme)
 	}
 
-	rendered := tea.NewView(view)
-	rendered.AltScreen = true
-	rendered.BackgroundColor = m.theme.Background
-	return rendered
+	return view
 }
 
 func max(a, b int) int {

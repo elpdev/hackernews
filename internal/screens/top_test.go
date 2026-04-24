@@ -13,7 +13,7 @@ import (
 	"github.com/elpdev/hackernews/internal/saved"
 )
 
-func TestRenderedArticleLinesPlacesImageAfterTitle(t *testing.T) {
+func TestRenderedArticleLinesPlacesImageReferenceAfterTitle(t *testing.T) {
 	articleRenderCache.lines = make(map[string][]string)
 	article := articles.Article{
 		Title:    "Story title",
@@ -23,15 +23,15 @@ func TestRenderedArticleLinesPlacesImageAfterTitle(t *testing.T) {
 		Markdown: "Article body.",
 	}
 
-	lines := renderedArticleLines(1, 80, article, articleImage{url: article.Image})
+	lines := renderedArticleLines(1, 80, article, articleImage{url: article.Image}, nil)
 	titleIndex := lineIndex(lines, "Story title")
-	imageIndex := lineIndex(lines, "Image: loading...")
+	imageIndex := lineIndex(lines, "Image 1:")
 	metaIndex := lineIndex(lines, "by alice")
 	if titleIndex < 0 {
 		t.Fatalf("expected rendered title in %q", strings.Join(lines, "\n"))
 	}
 	if imageIndex < 0 {
-		t.Fatalf("expected image loading line in %q", strings.Join(lines, "\n"))
+		t.Fatalf("expected image reference line in %q", strings.Join(lines, "\n"))
 	}
 	if metaIndex < 0 {
 		t.Fatalf("expected rendered metadata in %q", strings.Join(lines, "\n"))
@@ -67,7 +67,7 @@ func TestRenderedArticleLinesOmitsImageWithoutArticleImage(t *testing.T) {
 		Markdown: "Article body.",
 	}
 
-	lines := renderedArticleLines(2, 80, article, articleImage{})
+	lines := renderedArticleLines(2, 80, article, articleImage{}, nil)
 	if lineIndex(lines, "Image:") >= 0 {
 		t.Fatalf("expected no image line in %q", strings.Join(lines, "\n"))
 	}
@@ -81,7 +81,7 @@ func TestRenderedArticleLinesSeparatesMetadataFromBody(t *testing.T) {
 		Markdown: "Article body.",
 	}
 
-	lines := renderedArticleLines(4, 80, article, articleImage{})
+	lines := renderedArticleLines(4, 80, article, articleImage{}, nil)
 	metaIndex := lineIndex(lines, "by alice")
 	bodyIndex := lineIndex(lines, "Article body.")
 	if metaIndex < 0 || bodyIndex < 0 {
@@ -101,7 +101,7 @@ func TestRenderedArticleLinesCapsWideArticleWidth(t *testing.T) {
 		Markdown: strings.Repeat("word ", 80),
 	}
 
-	lines := renderedArticleLines(3, articleContentWidth(140), article, articleImage{})
+	lines := renderedArticleLines(3, articleContentWidth(140), article, articleImage{}, nil)
 	for _, line := range lines {
 		if width := lipgloss.Width(ansi.Strip(line)); width > articleMaxWidth {
 			t.Fatalf("expected line width <= %d, got %d for %q", articleMaxWidth, width, ansi.Strip(line))
@@ -255,39 +255,6 @@ func TestLabelUnlabeledCodeFencesUsesChromaAnalysis(t *testing.T) {
 	}
 }
 
-func TestStartArticleImageLoadRestartsCachedLoadingImage(t *testing.T) {
-	articleRenderCache.lines = make(map[string][]string)
-	top := NewTop()
-	top.images[7] = articleImage{url: "https://example.com/image.jpg"}
-
-	updated, cmd := top.startArticleImageLoad(7, articles.Article{
-		URL:   "https://example.com/story",
-		Image: "https://example.com/image.jpg",
-	})
-	if cmd == nil {
-		t.Fatal("expected image load command to restart for cached loading state")
-	}
-	if updated.images[7].url != "https://example.com/image.jpg" {
-		t.Fatalf("unexpected image URL: %q", updated.images[7].url)
-	}
-}
-
-func TestStartArticleImageLoadKeepsLoadedImage(t *testing.T) {
-	top := NewTop()
-	top.images[7] = articleImage{url: "https://example.com/image.jpg", bytes: []byte("image")}
-
-	updated, cmd := top.startArticleImageLoad(7, articles.Article{
-		URL:   "https://example.com/story",
-		Image: "https://example.com/image.jpg",
-	})
-	if cmd != nil {
-		t.Fatal("expected no image load command for already loaded image")
-	}
-	if string(updated.images[7].bytes) != "image" {
-		t.Fatal("expected loaded image bytes to be preserved")
-	}
-}
-
 func TestResolveArticleImageURL(t *testing.T) {
 	article := articles.Article{URL: "https://example.com/news/story", Image: "/media/hero.webp"}
 	if got := resolveArticleImageURL(article); got != "https://example.com/media/hero.webp" {
@@ -297,6 +264,78 @@ func TestResolveArticleImageURL(t *testing.T) {
 	article = articles.Article{URL: "https://example.com/news/story", Image: "//cdn.example.com/hero.webp"}
 	if got := resolveArticleImageURL(article); got != "https://cdn.example.com/hero.webp" {
 		t.Fatalf("unexpected protocol-relative URL: %q", got)
+	}
+}
+
+func TestArticleBodyImageURLsResolvesMarkdownImages(t *testing.T) {
+	article := articles.Article{
+		URL:      "https://example.com/news/story",
+		Markdown: "Intro\n\n![diagram](/media/diagram.png)\n\n![diagram again](/media/diagram.png)\n\n![photo](//cdn.example.com/photo.jpg)",
+	}
+
+	got := articleBodyImageURLs(article)
+	want := []string{"https://example.com/media/diagram.png", "https://cdn.example.com/photo.jpg"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("articleBodyImageURLs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestRenderedArticleLinesRendersBodyImageReference(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	article := articles.Article{
+		URL:      "https://example.com/news/story",
+		Markdown: "Intro\n\n![diagram](/media/diagram.png)\n\nOutro",
+	}
+
+	lines := renderedArticleLines(5, 80, article, articleImage{}, nil)
+	introIndex := lineIndex(lines, "Intro")
+	imageIndex := lineIndex(lines, "Image 1:")
+	outroIndex := lineIndex(lines, "Outro")
+	if introIndex < 0 || imageIndex < 0 || outroIndex < 0 {
+		t.Fatalf("expected intro, image reference, and outro in %q", strings.Join(lines, "\n"))
+	}
+	if !(introIndex < imageIndex && imageIndex < outroIndex) {
+		t.Fatalf("expected body image reference between text; got intro=%d image=%d outro=%d", introIndex, imageIndex, outroIndex)
+	}
+}
+
+func TestArticleViewportTopMovesInBands(t *testing.T) {
+	if got := articleViewportTop(3, 10, 100); got != 0 {
+		t.Fatalf("expected cursor near top to keep first viewport, got %d", got)
+	}
+	if got := articleViewportTop(6, 10, 100); got != 6 {
+		t.Fatalf("expected viewport to move at band boundary, got %d", got)
+	}
+	if got := articleViewportTop(99, 10, 92); got != 92 {
+		t.Fatalf("expected viewport top capped by max, got %d", got)
+	}
+}
+
+func TestStartBodyImageLoadLoadsOnDemand(t *testing.T) {
+	top := NewTop()
+
+	updated, cmd := top.startBodyImageLoad(7, "https://example.com/media/diagram.png")
+	if cmd == nil {
+		t.Fatal("expected body image load command")
+	}
+	image := updated.bodyImages[7]["https://example.com/media/diagram.png"]
+	if image.url != "https://example.com/media/diagram.png" {
+		t.Fatalf("unexpected body image: %#v", image)
+	}
+}
+
+func TestArticleBodyImageURLForCursorFindsNearestReference(t *testing.T) {
+	article := articles.Article{
+		URL:      "https://example.com/news/story",
+		Markdown: "Intro\n\n![diagram](/media/diagram.png)\n\nText\n\n![photo](photo.jpg)",
+	}
+	lines := renderedArticleLines(6, 80, article, articleImage{}, nil)
+	imageLine := lineIndex(lines, "Image 2:")
+	if imageLine < 0 {
+		t.Fatalf("expected second image reference in %q", strings.Join(lines, "\n"))
+	}
+	if got := articleBodyImageURLForCursor(article, lines, imageLine); got != "https://example.com/news/photo.jpg" {
+		t.Fatalf("unexpected image URL: %q", got)
 	}
 }
 
@@ -672,7 +711,7 @@ func TestRenderArticleFallbackBodyWhenMarkdownEmpty(t *testing.T) {
 		URL:   "https://example.com/spa",
 	}
 
-	lines := renderedArticleLines(101, 80, article, articleImage{})
+	lines := renderedArticleLines(101, 80, article, articleImage{}, nil)
 	body := ansi.Strip(strings.Join(lines, "\n"))
 	if !strings.Contains(body, "Couldn't extract readable content") {
 		t.Fatalf("expected fallback copy in %q", body)
@@ -693,7 +732,7 @@ func TestRenderArticleNoFallbackWhenBodyPresent(t *testing.T) {
 		Markdown: "Article body.",
 	}
 
-	lines := renderedArticleLines(102, 80, article, articleImage{})
+	lines := renderedArticleLines(102, 80, article, articleImage{}, nil)
 	body := ansi.Strip(strings.Join(lines, "\n"))
 	if strings.Contains(body, "Couldn't extract") {
 		t.Fatalf("did not expect fallback copy when body present: %q", body)
@@ -851,7 +890,7 @@ func TestArticleParagraphKeysMoveBetweenParagraphs(t *testing.T) {
 	top := NewTop()
 	top.articles[7] = articles.Article{Markdown: "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."}
 	top.readID = 7
-	lines := renderedArticleLines(7, 80, top.articles[7], articleImage{})
+	lines := renderedArticleLines(7, 80, top.articles[7], articleImage{}, nil)
 	second := lineIndex(lines, "Second paragraph")
 	third := lineIndex(lines, "Third paragraph")
 	if second < 0 || third < 0 {
@@ -898,7 +937,7 @@ func TestSavedArticleParagraphKeysMoveBetweenParagraphs(t *testing.T) {
 	screen.loading = ""
 	screen.items = []saved.Article{{ID: 3, Article: articles.Article{Markdown: "First paragraph.\n\nSecond paragraph."}}}
 	screen.readID = 3
-	lines := renderedArticleLines(3, 80, screen.items[0].Article, articleImage{})
+	lines := renderedArticleLines(3, 80, screen.items[0].Article, articleImage{}, nil)
 	second := lineIndex(lines, "Second paragraph")
 	if second < 0 {
 		t.Fatalf("expected second paragraph in %q", strings.Join(lines, "\n"))

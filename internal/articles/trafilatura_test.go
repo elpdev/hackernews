@@ -49,7 +49,7 @@ func TestTrafilaturaCommandArgsUsesExplicitScript(t *testing.T) {
 
 func TestTrafilaturaCLIArgsExtractMarkdown(t *testing.T) {
 	args := trafilaturaCLIArgs("https://example.com/article")
-	want := []string{"--markdown", "--no-comments", "--no-tables", "-u", "https://example.com/article"}
+	want := []string{"--markdown", "--images", "--no-comments", "--no-tables", "-u", "https://example.com/article"}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("trafilaturaCLIArgs() = %#v, want %#v", args, want)
 	}

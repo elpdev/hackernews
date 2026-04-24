@@ -18,7 +18,7 @@ func (s Saved) articleView(width, height int) string {
 	}
 	contentHeight := maxScreen(1, height-len(header)-1)
 	contentWidth := articleContentWidth(width)
-	lines := renderedArticleLines(item.ID, contentWidth, item.Article, articleImage{})
+	lines := renderedArticleLines(item.ID, contentWidth, item.Article, articleImage{}, nil)
 	maxTop := maxScreen(0, len(lines)-contentHeight)
 	cursor := clampIndex(s.readLine, len(lines))
 	top := centeredTop(cursor, contentHeight, maxTop)

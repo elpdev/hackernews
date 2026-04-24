@@ -8,6 +8,20 @@ import (
 
 func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	if t.readID != 0 {
+		if t.imageURL != "" {
+			switch msg.String() {
+			case "esc", "i":
+				t.imageURL = ""
+				return t, nil
+			case "o":
+				t.status = t.openArticleURL(t.imageURL)
+				return t, nil
+			case "y":
+				t.status = t.copyArticleURL(t.imageURL)
+				return t, nil
+			}
+			return t, nil
+		}
 		switch msg.String() {
 		case "s":
 			return t, t.toggleSaved(t.readID)
@@ -17,6 +31,15 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		case "y":
 			t.status = t.copyArticleURL(t.articleURLForID(t.readID))
 			return t, nil
+		case "i":
+			lines := cachedArticleLines(t.readID)
+			imageURL := articleBodyImageURLForCursor(t.articles[t.readID], lines, t.readLine)
+			if imageURL == "" {
+				t.status = "No article image reference nearby"
+				return t, nil
+			}
+			t.imageURL = imageURL
+			return t.startBodyImageLoad(t.readID, imageURL)
 		case "c":
 			if story, ok := t.storyByID(t.readID); ok {
 				return t, func() tea.Msg {
@@ -28,6 +51,7 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			t.readID = 0
 			t.readTop = 0
 			t.readLine = 0
+			t.imageURL = ""
 			return t, nil
 		case "up", "k":
 			if t.readLine > 0 {
@@ -118,12 +142,12 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		}
 		story := matches[t.selected].story
 		markRead := t.markRead(story.ID)
-		if article, ok := t.articles[story.ID]; ok {
+		if _, ok := t.articles[story.ID]; ok {
 			t.readID = story.ID
 			t.readTop = 0
 			t.readLine = 0
-			t, cmd := t.startArticleImageLoad(story.ID, article)
-			return t, tea.Batch(markRead, cmd)
+			t.imageURL = ""
+			return t, markRead
 		}
 		t.loading = "Fetching article..."
 		t.err = ""
