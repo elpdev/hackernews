@@ -16,6 +16,7 @@ type PaletteModel struct {
 	executed *Command
 	action   PaletteAction
 	page     palettePage
+	parents  []string
 	original string
 	sync     SyncSetup
 	field    int
@@ -71,6 +72,10 @@ func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "esc":
+			if m.inCategory() {
+				m.goBack()
+				return m, nil
+			}
 			m.action = PaletteAction{Type: PaletteActionClose}
 			return m, nil
 		case "up", "ctrl+p":
@@ -89,12 +94,19 @@ func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
 				return m, nil
 			}
 			command := matches[m.selected]
+			if m.registry.HasChildren(command.ID) {
+				m.openCategory(command.ID)
+				return m, nil
+			}
 			if command.ID == "themes" {
 				m.openThemes()
 				return m, nil
 			}
 			if command.ID == "setup-sync" {
 				m.openSyncSetup()
+				return m, nil
+			}
+			if command.Run == nil {
 				return m, nil
 			}
 			m.executed = &command
@@ -104,6 +116,8 @@ func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
 			if len(m.query) > 0 {
 				m.query = m.query[:len(m.query)-1]
 				m.selected = 0
+			} else if m.inCategory() {
+				m.goBack()
 			}
 			return m, nil
 		case "space":
@@ -202,11 +216,11 @@ func (m PaletteModel) View(t theme.Theme) string {
 
 	matches := m.matches()
 	var b strings.Builder
-	b.WriteString(t.Title.Render("Command Palette"))
+	b.WriteString(t.Title.Render(m.title()))
 	b.WriteString("\n")
 	query := m.query
 	if query == "" {
-		query = t.Muted.Render("type a command...")
+		query = t.Muted.Render("type to search all commands...")
 	}
 	b.WriteString("> " + query)
 	b.WriteString("\n\n")
@@ -215,7 +229,11 @@ func (m PaletteModel) View(t theme.Theme) string {
 		b.WriteString(t.Muted.Render("No commands found"))
 	} else {
 		for i, command := range matches {
-			line := fmt.Sprintf("%-18s %s", command.Title, command.Description)
+			title := command.Title
+			if m.registry.HasChildren(command.ID) {
+				title += " ›"
+			}
+			line := fmt.Sprintf("%-18s %s", title, command.Description)
 			if i == m.selected {
 				line = t.Selected.Render(line)
 			} else {
@@ -281,6 +299,7 @@ func (m *PaletteModel) Reset(currentTheme string) {
 	m.executed = nil
 	m.action = PaletteAction{}
 	m.page = paletteRoot
+	m.parents = nil
 	m.original = currentTheme
 	m.field = 0
 }
@@ -291,7 +310,56 @@ func (m PaletteModel) Action() PaletteAction { return m.action }
 
 func (m *PaletteModel) ClearAction() { m.action = PaletteAction{} }
 
-func (m PaletteModel) matches() []Command { return m.registry.Filter(m.query) }
+func (m PaletteModel) matches() []Command {
+	if strings.TrimSpace(m.query) != "" {
+		matches := m.registry.Filter(m.query)
+		commands := make([]Command, 0, len(matches))
+		for _, command := range matches {
+			if !m.registry.HasChildren(command.ID) {
+				commands = append(commands, command)
+			}
+		}
+		return commands
+	}
+	return m.registry.Children(m.currentParent())
+}
+
+func (m PaletteModel) currentParent() string {
+	if len(m.parents) == 0 {
+		return ""
+	}
+	return m.parents[len(m.parents)-1]
+}
+
+func (m PaletteModel) inCategory() bool { return len(m.parents) > 0 }
+
+func (m PaletteModel) title() string {
+	if len(m.parents) == 0 {
+		return "Command Palette"
+	}
+	parts := []string{"Command Palette"}
+	for _, id := range m.parents {
+		if command, ok := m.registry.Find(id); ok {
+			parts = append(parts, command.Title)
+		}
+	}
+	return strings.Join(parts, " / ")
+}
+
+func (m *PaletteModel) openCategory(id string) {
+	m.parents = append(m.parents, id)
+	m.query = ""
+	m.selected = 0
+}
+
+func (m *PaletteModel) goBack() {
+	if len(m.parents) == 0 {
+		return
+	}
+	m.parents = m.parents[:len(m.parents)-1]
+	m.query = ""
+	m.selected = 0
+}
 
 func (m *PaletteModel) openThemes() {
 	m.page = paletteThemes
