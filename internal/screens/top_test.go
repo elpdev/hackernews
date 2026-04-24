@@ -191,7 +191,7 @@ func TestInferLooseCodeLanguageSupportsRuby(t *testing.T) {
 	}
 }
 
-func TestLabelUnlabeledCodeFencesInfersRubyHeredoc(t *testing.T) {
+func TestLabelUnlabeledCodeFencesSplitsRubyHeredoc(t *testing.T) {
 	markdown := strings.Join([]string{
 		"```",
 		"# Write a Ruby program:",
@@ -209,8 +209,17 @@ func TestLabelUnlabeledCodeFencesInfersRubyHeredoc(t *testing.T) {
 	}, "\n")
 
 	got := labelUnlabeledCodeFences(markdown)
+	if !strings.Contains(got, "```bash") {
+		t.Fatalf("expected bash fence for shell wrapper in normalized markdown:\n%s", got)
+	}
 	if !strings.Contains(got, "```ruby") {
-		t.Fatalf("expected ruby fence in normalized markdown:\n%s", got)
+		t.Fatalf("expected ruby fence for heredoc body in normalized markdown:\n%s", got)
+	}
+	if strings.Contains(got, "```ruby\n# Write a Ruby program") {
+		t.Fatalf("expected shell comments to stay outside ruby fence:\n%s", got)
+	}
+	if !strings.Contains(got, "def fib(n)\n  if n < 2\n    n\n  else\n    fib(n - 1) + fib(n - 2)\n  end\nend\nputs fib(34)") {
+		t.Fatalf("expected ruby heredoc body to be indented:\n%s", got)
 	}
 }
 
@@ -226,6 +235,23 @@ func TestLabelUnlabeledCodeFencesInfersShellCommands(t *testing.T) {
 	got := labelUnlabeledCodeFences(markdown)
 	if !strings.Contains(got, "```bash") {
 		t.Fatalf("expected bash fence in normalized markdown:\n%s", got)
+	}
+}
+
+func TestLabelUnlabeledCodeFencesUsesChromaAnalysis(t *testing.T) {
+	markdown := strings.Join([]string{
+		"```",
+		"package main",
+		"",
+		"func main() {",
+		"println(\"hi\")",
+		"}",
+		"```",
+	}, "\n")
+
+	got := labelUnlabeledCodeFences(markdown)
+	if !strings.Contains(got, "```go") {
+		t.Fatalf("expected Chroma to infer go fence in normalized markdown:\n%s", got)
 	}
 }
 
