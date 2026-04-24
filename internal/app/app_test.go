@@ -8,10 +8,10 @@ import (
 
 func TestSwitchScreenForTest(t *testing.T) {
 	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
-	model = model.SwitchScreenForTest("settings")
+	model = model.SwitchScreenForTest("saved")
 
-	if model.CurrentScreenID() != "settings" {
-		t.Fatalf("expected settings screen, got %q", model.CurrentScreenID())
+	if model.CurrentScreenID() != "saved" {
+		t.Fatalf("expected saved screen, got %q", model.CurrentScreenID())
 	}
 }
 

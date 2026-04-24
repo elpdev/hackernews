@@ -18,7 +18,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case routeMsg:
 		m.switchScreen(msg.ScreenID)
 		m.showCommandPalette = false
-		m.updateDerivedScreens()
 		if msg.ScreenID == "saved" {
 			return m, m.screens[msg.ScreenID].Init()
 		}
@@ -26,7 +25,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toggleSidebarMsg:
 		m.showSidebar = !m.showSidebar
 		m.logs.Info(fmt.Sprintf("Sidebar toggled: %t", m.showSidebar))
-		m.updateDerivedScreens()
 		return m, nil
 	case quitMsg:
 		m.logs.Info("Command executed: Quit")
@@ -135,18 +133,15 @@ func (m Model) handlePaletteAction(action commands.PaletteAction) (tea.Model, te
 		return m, func() tea.Msg { return commandsExecutedMsg{Title: action.Command.Title, Cmd: action.Command.Run()} }
 	case commands.PaletteActionPreviewTheme:
 		m.theme = *action.Theme
-		m.updateDerivedScreens()
 		return m, nil
 	case commands.PaletteActionConfirmTheme:
 		m.theme = *action.Theme
 		m.logs.Info(fmt.Sprintf("Theme selected: %s", m.theme.Name))
-		m.updateDerivedScreens()
 		m.showCommandPalette = false
 		m.commandPalette.Reset(m.theme.Name)
 		return m, nil
 	case commands.PaletteActionCancelTheme:
 		m.theme = *action.Theme
-		m.updateDerivedScreens()
 		return m, nil
 	}
 	return m, nil
@@ -168,21 +163,8 @@ func (m Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.switchScreen(m.screenOrder[idx])
-	m.updateDerivedScreens()
 	if m.activeScreen == "saved" {
 		return m, m.screens[m.activeScreen].Init()
 	}
 	return m, nil
-}
-
-func (m *Model) updateDerivedScreens() {
-	m.screens["settings"] = screens.NewSettings(screens.SettingsState{
-		ThemeName:      m.theme.Name,
-		SidebarVisible: m.showSidebar,
-		Version:        m.meta.Version,
-		Commit:         m.meta.Commit,
-		Date:           m.meta.Date,
-	})
-	m.screens["help"] = screens.NewHelp(m.keys.FullHelp())
-	m.screens["logs"] = screens.NewLogs(m.logs)
 }
