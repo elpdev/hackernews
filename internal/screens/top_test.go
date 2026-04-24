@@ -185,7 +185,7 @@ func TestListViewShowsFilteredResults(t *testing.T) {
 	if strings.Contains(view, "Rust story") {
 		t.Fatalf("did not expect non-matching story in %q", view)
 	}
-	if !strings.Contains(view, "1 matches on page") {
+	if !strings.Contains(view, "1 matches") {
 		t.Fatalf("expected filtered count in %q", view)
 	}
 }
@@ -230,15 +230,162 @@ func TestEnterReadsSelectedFilteredStory(t *testing.T) {
 	}
 }
 
+func TestAllLoadedStoriesSpansPages(t *testing.T) {
+	top := NewTop()
+	top.loading = ""
+	top.storyIDs = []int{11, 12, 13, 14}
+	top.pages[0] = []hn.Item{
+		{ID: 11, Title: "A"},
+		{ID: 12, Title: "B"},
+	}
+	top.pages[1] = []hn.Item{
+		{ID: 13, Title: "C"},
+		{ID: 14, Title: "D"},
+	}
+
+	items := top.allLoadedStories()
+	if len(items) != 4 {
+		t.Fatalf("expected 4 loaded stories across pages, got %d", len(items))
+	}
+	wantTitles := []string{"A", "B", "C", "D"}
+	for i, item := range items {
+		if item.index != i {
+			t.Fatalf("item %d has index %d, want %d", i, item.index, i)
+		}
+		if item.story.Title != wantTitles[i] {
+			t.Fatalf("item %d has title %q, want %q", i, item.story.Title, wantTitles[i])
+		}
+	}
+}
+
+func TestSortedStoriesByPointsDescending(t *testing.T) {
+	top := topWithStories()
+	top.sortMode = sortPoints
+
+	items := top.sortedFilteredStories()
+	gotTitles := make([]string, 0, len(items))
+	gotIndices := make([]int, 0, len(items))
+	for _, item := range items {
+		gotTitles = append(gotTitles, item.story.Title)
+		gotIndices = append(gotIndices, item.index)
+	}
+	if strings.Join(gotTitles, ",") != "SQLite tips,Rust story,Go story" {
+		t.Fatalf("expected points-desc order, got %v", gotTitles)
+	}
+	if gotIndices[0] != 2 || gotIndices[1] != 1 || gotIndices[2] != 0 {
+		t.Fatalf("expected preserved HN-rank indices [2 1 0], got %v", gotIndices)
+	}
+}
+
+func TestSortedStoriesByRecentDescending(t *testing.T) {
+	top := topWithStories()
+	top.sortMode = sortRecent
+
+	items := top.sortedFilteredStories()
+	gotTitles := make([]string, 0, len(items))
+	for _, item := range items {
+		gotTitles = append(gotTitles, item.story.Title)
+	}
+	if strings.Join(gotTitles, ",") != "Go story,SQLite tips,Rust story" {
+		t.Fatalf("expected recent-desc order, got %v", gotTitles)
+	}
+}
+
+func TestSortKeyCyclesModes(t *testing.T) {
+	top := topWithStories()
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+	if top.sortMode != sortRecent {
+		t.Fatalf("expected sortRecent after 1st o, got %v", top.sortMode)
+	}
+	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+	if top.sortMode != sortPoints {
+		t.Fatalf("expected sortPoints after 2nd o, got %v", top.sortMode)
+	}
+	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+	if top.sortMode != sortDefault {
+		t.Fatalf("expected sortDefault after 3rd o, got %v", top.sortMode)
+	}
+}
+
+func TestFilterSpansAllLoadedPages(t *testing.T) {
+	top := NewTop()
+	top.loading = ""
+	top.storyIDs = []int{1, 2, 3, 4}
+	top.pages[0] = []hn.Item{
+		{ID: 1, Title: "Go story"},
+		{ID: 2, Title: "Rust story"},
+	}
+	top.pages[1] = []hn.Item{
+		{ID: 3, Title: "Python tricks"},
+		{ID: 4, Title: "Another Rust post"},
+	}
+	top.page = 0
+	top.stories = top.pages[0]
+	top.searchQuery = "rust"
+
+	titles := filteredStoryTitles(top)
+	if len(titles) != 2 {
+		t.Fatalf("expected 2 cross-page matches, got %v", titles)
+	}
+	if !(titles[0] == "Rust story" && titles[1] == "Another Rust post") {
+		t.Fatalf("expected matches from both pages in rank order, got %v", titles)
+	}
+}
+
+func TestDefaultViewStaysPageScoped(t *testing.T) {
+	top := NewTop()
+	top.loading = ""
+	top.storyIDs = []int{1, 2, 3, 4}
+	top.pages[0] = []hn.Item{
+		{ID: 1, Title: "p0a"},
+		{ID: 2, Title: "p0b"},
+	}
+	top.pages[1] = []hn.Item{
+		{ID: 3, Title: "p1a"},
+		{ID: 4, Title: "p1b"},
+	}
+	top.page = 0
+	top.stories = top.pages[0]
+
+	items := top.filteredStories()
+	if len(items) != 2 {
+		t.Fatalf("expected default view to be page-scoped (2 items), got %d", len(items))
+	}
+	if items[0].story.Title != "p0a" || items[1].story.Title != "p0b" {
+		t.Fatalf("expected page-0 stories, got %v", items)
+	}
+	if items[0].index != 0 || items[1].index != 1 {
+		t.Fatalf("expected global-rank indices [0 1], got [%d %d]", items[0].index, items[1].index)
+	}
+}
+
+func TestSortCombinedWithSearchFilter(t *testing.T) {
+	top := topWithStories()
+	top.searchQuery = "story"
+	top.sortMode = sortPoints
+
+	items := top.sortedFilteredStories()
+	gotTitles := make([]string, 0, len(items))
+	for _, item := range items {
+		gotTitles = append(gotTitles, item.story.Title)
+	}
+	if strings.Join(gotTitles, ",") != "Rust story,Go story" {
+		t.Fatalf("expected filtered+sorted result, got %v", gotTitles)
+	}
+}
+
 func topWithStories() Top {
 	top := NewTop()
 	top.loading = ""
 	top.storyIDs = []int{1, 2, 3}
-	top.stories = []hn.Item{
-		{ID: 1, Title: "Go story", URL: "https://example.com/go", Score: 10, By: "alice", Descendants: 3},
-		{ID: 2, Title: "Rust story", URL: "https://rust-lang.org/news", Score: 20, By: "bob", Descendants: 4},
-		{ID: 3, Title: "SQLite tips", URL: "https://sqlite.org/tips", Score: 30, By: "carol", Descendants: 5},
+	stories := []hn.Item{
+		{ID: 1, Title: "Go story", URL: "https://example.com/go", Score: 10, By: "alice", Descendants: 3, Time: 300},
+		{ID: 2, Title: "Rust story", URL: "https://rust-lang.org/news", Score: 20, By: "bob", Descendants: 4, Time: 100},
+		{ID: 3, Title: "SQLite tips", URL: "https://sqlite.org/tips", Score: 30, By: "carol", Descendants: 5, Time: 200},
 	}
+	top.stories = stories
+	top.pages[0] = stories
 	return top
 }
 
