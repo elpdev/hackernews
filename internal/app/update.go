@@ -19,6 +19,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.switchScreen(msg.ScreenID)
 		m.showCommandPalette = false
 		m.updateDerivedScreens()
+		if msg.ScreenID == "saved" {
+			return m, m.screens[msg.ScreenID].Init()
+		}
 		return m, nil
 	case toggleSidebarMsg:
 		m.showSidebar = !m.showSidebar
@@ -166,6 +169,9 @@ func (m Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.switchScreen(m.screenOrder[idx])
 	m.updateDerivedScreens()
+	if m.activeScreen == "saved" {
+		return m, m.screens[m.activeScreen].Init()
+	}
 	return m, nil
 }
 

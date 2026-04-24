@@ -71,6 +71,21 @@ func TestCapturedScreenKeyBypassesGlobalQuit(t *testing.T) {
 	}
 }
 
+func TestSidebarNavigationInitializesSavedScreen(t *testing.T) {
+	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
+	model = sendKey(t, model, tea.Key{Code: tea.KeyTab})
+	model = sendKey(t, model, tea.Key{Code: tea.KeyDown})
+
+	updated, cmd := model.Update(keyPress(tea.Key{Code: tea.KeyEnter}))
+	model = updated.(Model)
+	if model.CurrentScreenID() != "saved" {
+		t.Fatalf("expected saved screen, got %q", model.CurrentScreenID())
+	}
+	if cmd == nil {
+		t.Fatal("expected saved screen init command")
+	}
+}
+
 func openThemePalette(t *testing.T, model Model) Model {
 	t.Helper()
 	model = sendKey(t, model, tea.Key{Code: 'k', Mod: tea.ModCtrl})
