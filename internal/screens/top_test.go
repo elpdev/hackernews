@@ -404,15 +404,15 @@ func TestSortedStoriesByRecentDescending(t *testing.T) {
 func TestSortKeyCyclesModes(t *testing.T) {
 	top := topWithStories()
 
-	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+	top = updateTopWithKey(t, top, tea.Key{Text: "O", Code: 'O'})
 	if top.sortMode != sortRecent {
 		t.Fatalf("expected sortRecent after 1st o, got %v", top.sortMode)
 	}
-	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+	top = updateTopWithKey(t, top, tea.Key{Text: "O", Code: 'O'})
 	if top.sortMode != sortPoints {
 		t.Fatalf("expected sortPoints after 2nd o, got %v", top.sortMode)
 	}
-	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+	top = updateTopWithKey(t, top, tea.Key{Text: "O", Code: 'O'})
 	if top.sortMode != sortDefault {
 		t.Fatalf("expected sortDefault after 3rd o, got %v", top.sortMode)
 	}

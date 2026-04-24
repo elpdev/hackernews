@@ -38,6 +38,10 @@ type Comments struct {
 	err      string
 	status   string
 	returnTo string
+
+	searching    bool
+	searchQuery  string
+	allCollapsed bool
 }
 
 type commentLine struct {
@@ -128,6 +132,17 @@ func (c Comments) View(width, height int) string {
 	if c.status != "" {
 		head.WriteString(truncateScreen(c.status, width) + "\n")
 	}
+	if c.searching || c.searchQuery != "" {
+		label := "Filter"
+		if c.searching {
+			label = "Search"
+		}
+		query := c.searchQuery
+		if query == "" {
+			query = lipgloss.NewStyle().Faint(true).Render("type to search comments...")
+		}
+		head.WriteString(truncateScreen(label+": "+query, width) + "\n")
+	}
 	head.WriteString("\n")
 
 	headerText := head.String()
@@ -186,8 +201,13 @@ func (c Comments) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
 		key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
 		key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
+		key.NewBinding(key.WithKeys("left", "p"), key.WithHelp("left/p", "prev thread/match")),
+		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next thread/match")),
 		key.NewBinding(key.WithKeys("space", "enter"), key.WithHelp("space/enter", "collapse")),
-		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "parent")),
+		key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "parent")),
+		key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "collapse all")),
+		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
 		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 		key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy url")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
@@ -195,7 +215,14 @@ func (c Comments) KeyBindings() []key.Binding {
 	}
 }
 
+func (c Comments) CapturesKey(msg tea.KeyPressMsg) bool {
+	return c.searching && msg.String() != "ctrl+c"
+}
+
 func (c Comments) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	if c.searching {
+		return c.handleSearchKey(msg)
+	}
 	switch msg.String() {
 	case "esc":
 		dest := c.returnTo
@@ -212,6 +239,12 @@ func (c Comments) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return c, nil
 	case "y":
 		c.status = commentsCopyURL(c.copier, c.hnURL())
+		return c, nil
+	case "/":
+		c.searching = true
+		return c, nil
+	case "ctrl+u":
+		c.searchQuery = ""
 		return c, nil
 	}
 	if len(c.order) == 0 {
@@ -251,7 +284,11 @@ func (c Comments) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 				break
 			}
 		}
-	case "p":
+	case "left", "p":
+		c.selected = c.previousTopLevel(c.selected)
+	case "right", "n":
+		c.selected = c.nextTopLevel(c.selected)
+	case "P":
 		cur := c.order[c.selected].id
 		if parent, ok := c.parentOf[cur]; ok && parent != c.story.ID {
 			for i, line := range c.order {
@@ -261,6 +298,49 @@ func (c Comments) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 				}
 			}
 		}
+	case "a":
+		c.allCollapsed = !c.allCollapsed
+		c.collapsed = make(map[int]bool)
+		if c.allCollapsed {
+			for _, line := range c.order {
+				if countDescendants(c.tree, line.id) > 0 {
+					c.collapsed[line.id] = true
+				}
+			}
+		}
+		selectedID := c.order[c.selected].id
+		c.order = c.buildOrder()
+		c.selected = c.indexOfVisibleComment(selectedID)
+	}
+	return c, nil
+}
+
+func (c Comments) handleSearchKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		c.searching = false
+		return c, nil
+	case "ctrl+u":
+		c.searchQuery = ""
+		return c, nil
+	case "backspace", "ctrl+h":
+		if len(c.searchQuery) > 0 {
+			c.searchQuery = c.searchQuery[:len(c.searchQuery)-1]
+		}
+		return c, nil
+	case "space":
+		c.searchQuery += " "
+		return c, nil
+	case "right", "n", "enter":
+		c.selected = c.nextSearchMatch(c.selected)
+		return c, nil
+	case "left", "p":
+		c.selected = c.previousSearchMatch(c.selected)
+		return c, nil
+	}
+	if len(msg.String()) == 1 {
+		c.searchQuery += msg.String()
+		c.selected = c.nextSearchMatch(c.selected - 1)
 	}
 	return c, nil
 }
@@ -384,8 +464,76 @@ func commentsHeaderBlock(story hn.Item, width int) []string {
 			out = append(out, truncateScreen(line, width))
 		}
 	}
-	out = append(out, truncateScreen(muted.Render("esc back · j/k nav · space collapse · p parent · o open · y copy · r refresh"), width))
+	out = append(out, truncateScreen(muted.Render("esc back · j/k move · left/right or p/n prev/next · / search · P parent · space collapse · o open"), width))
 	return out
+}
+
+func (c Comments) nextTopLevel(from int) int {
+	for i := from + 1; i < len(c.order); i++ {
+		if c.order[i].depth == 0 {
+			return i
+		}
+	}
+	return from
+}
+
+func (c Comments) previousTopLevel(from int) int {
+	for i := from - 1; i >= 0; i-- {
+		if c.order[i].depth == 0 {
+			return i
+		}
+	}
+	return from
+}
+
+func (c Comments) nextSearchMatch(from int) int {
+	if strings.TrimSpace(c.searchQuery) == "" || len(c.order) == 0 {
+		return clampIndex(from, len(c.order))
+	}
+	for step := 1; step <= len(c.order); step++ {
+		idx := (from + step + len(c.order)) % len(c.order)
+		if c.commentMatches(c.order[idx].id) {
+			return idx
+		}
+	}
+	return clampIndex(from, len(c.order))
+}
+
+func (c Comments) previousSearchMatch(from int) int {
+	if strings.TrimSpace(c.searchQuery) == "" || len(c.order) == 0 {
+		return clampIndex(from, len(c.order))
+	}
+	for step := 1; step <= len(c.order); step++ {
+		idx := (from - step + len(c.order)) % len(c.order)
+		if c.commentMatches(c.order[idx].id) {
+			return idx
+		}
+	}
+	return clampIndex(from, len(c.order))
+}
+
+func (c Comments) commentMatches(id int) bool {
+	query := strings.ToLower(strings.TrimSpace(c.searchQuery))
+	if query == "" {
+		return false
+	}
+	item := c.tree[id]
+	fields := []string{item.By, commentHTMLToMarkdown(item.Text)}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c Comments) indexOfVisibleComment(id int) int {
+	for i, line := range c.order {
+		if line.id == id {
+			return i
+		}
+	}
+	return clampIndex(c.selected, len(c.order))
 }
 
 func commentBodyMarkdown(item hn.Item) string {

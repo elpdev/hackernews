@@ -16,6 +16,14 @@ type NavigateMsg struct {
 	ScreenID string
 }
 
+type HideReadToggledMsg struct {
+	HideRead bool
+}
+
+type SortModeChangedMsg struct {
+	Mode string
+}
+
 // TargetedMsg identifies async results that should be delivered to the screen
 // that started the work, even if another screen is active when they complete.
 type TargetedMsg interface {

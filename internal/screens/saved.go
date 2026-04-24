@@ -3,6 +3,7 @@ package screens
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +29,34 @@ type Saved struct {
 	loading  string
 	err      string
 	status   string
+
+	searching   bool
+	searchQuery string
+	sortMode    savedSortMode
+}
+
+type savedSortMode int
+
+const (
+	savedSortSavedAt savedSortMode = iota
+	savedSortStoryDate
+	savedSortTitle
+)
+
+func (m savedSortMode) label() string {
+	switch m {
+	case savedSortStoryDate:
+		return "story date"
+	case savedSortTitle:
+		return "title"
+	default:
+		return "saved date"
+	}
+}
+
+type savedListItem struct {
+	index int
+	item  saved.Article
 }
 
 type savedArticlesLoadedMsg struct {
@@ -102,7 +131,11 @@ func (s Saved) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("down/j", "down")),
 		key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
-		key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[/]", "paragraph")),
+		key.NewBinding(key.WithKeys("left", "p"), key.WithHelp("left/p", "prev paragraph")),
+		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next paragraph")),
+		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
+		key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "cycle sort")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comments")),
 		key.NewBinding(key.WithKeys("s", "d"), key.WithHelp("s/d", "delete")),
@@ -111,6 +144,10 @@ func (s Saved) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
+}
+
+func (s Saved) CapturesKey(msg tea.KeyPressMsg) bool {
+	return s.searching && s.readID == 0 && msg.String() != "ctrl+c"
 }
 
 func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
@@ -156,13 +193,17 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			}
 		case "pgdown":
 			s.readLine += 10
-		case "]":
+		case "]", "right", "n":
 			s.readLine = nextParagraphLine(cachedArticleLines(s.readID), s.readLine)
-		case "[":
+		case "[", "left", "p":
 			s.readLine = previousParagraphLine(cachedArticleLines(s.readID), s.readLine)
 		}
 		s.readLine = clampIndex(s.readLine, cachedArticleLineCount(s.readID))
 		return s, nil
+	}
+
+	if s.searching {
+		return s.handleSearchKey(msg)
 	}
 
 	switch msg.String() {
@@ -170,19 +211,33 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.loading = "Loading saved articles..."
 		s.err = ""
 		return s, s.load()
+	case "/":
+		s.searching = true
+		return s, nil
+	case "ctrl+u":
+		s.searchQuery = ""
+		s.selected = 0
+		s.listTop = 0
+		return s, nil
+	case "O":
+		s.sortMode = (s.sortMode + 1) % 3
+		s.selected = 0
+		s.listTop = 0
+		return s, nil
 	}
-	if len(s.items) == 0 {
+	matches := s.filteredItems()
+	if len(matches) == 0 {
 		return s, nil
 	}
 
-	s.selected = clampIndex(s.selected, len(s.items))
+	s.selected = clampIndex(s.selected, len(matches))
 	switch msg.String() {
 	case "up", "k":
 		if s.selected > 0 {
 			s.selected--
 		}
 	case "down", "j":
-		if s.selected < len(s.items)-1 {
+		if s.selected < len(matches)-1 {
 			s.selected++
 		}
 	case "pgup":
@@ -192,21 +247,54 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		}
 	case "pgdown":
 		s.selected += 10
-		if s.selected >= len(s.items) {
-			s.selected = len(s.items) - 1
+		if s.selected >= len(matches) {
+			s.selected = len(matches) - 1
 		}
 	case "enter":
-		s.readID = s.items[s.selected].ID
+		s.readID = matches[s.selected].item.ID
 		s.readLine = 0
 	case "s", "d":
-		return s, s.delete(s.items[s.selected].ID)
+		return s, s.delete(matches[s.selected].item.ID)
 	case "y":
-		s.status = s.copyArticleURL(savedArticleURL(s.items[s.selected]))
+		s.status = s.copyArticleURL(savedArticleURL(matches[s.selected].item))
+	case "o":
+		s.status = s.openArticleURL(savedArticleURL(matches[s.selected].item))
 	case "c":
-		item := s.items[s.selected]
+		item := matches[s.selected].item
 		return s, func() tea.Msg {
 			return OpenCommentsMsg{Story: item.Story, ReturnTo: "saved"}
 		}
+	}
+	return s, nil
+}
+
+func (s Saved) handleSearchKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		s.searching = false
+		return s, nil
+	case "ctrl+u":
+		s.searchQuery = ""
+		s.selected = 0
+		s.listTop = 0
+		return s, nil
+	case "backspace", "ctrl+h":
+		if len(s.searchQuery) > 0 {
+			s.searchQuery = s.searchQuery[:len(s.searchQuery)-1]
+			s.selected = 0
+			s.listTop = 0
+		}
+		return s, nil
+	case "space":
+		s.searchQuery += " "
+		s.selected = 0
+		s.listTop = 0
+		return s, nil
+	}
+	if len(msg.String()) == 1 {
+		s.searchQuery += msg.String()
+		s.selected = 0
+		s.listTop = 0
 	}
 	return s, nil
 }
@@ -251,10 +339,26 @@ func (s Saved) listView(width, height int) string {
 	if s.status != "" {
 		b.WriteString(s.status + "\n")
 	}
+	matches := s.filteredItems()
 	if len(s.items) == 0 {
 		if s.loading == "" {
 			b.WriteString("No saved articles yet. Press s on a top story to save it.\n")
 		}
+		return b.String()
+	}
+	if s.searching || s.searchQuery != "" || s.sortMode != savedSortSavedAt {
+		label := "Filter"
+		if s.searching {
+			label = "Search"
+		}
+		query := s.searchQuery
+		if query == "" {
+			query = lipgloss.NewStyle().Faint(true).Render("type to filter saved articles...")
+		}
+		b.WriteString(truncateScreen(fmt.Sprintf("%s: %s | sort: %s", label, query, s.sortMode.label()), width) + "\n")
+	}
+	if len(matches) == 0 {
+		b.WriteString(fmt.Sprintf("No saved articles match %q. Press ctrl+u to clear.\n", s.searchQuery))
 		return b.String()
 	}
 
@@ -265,12 +369,13 @@ func (s Saved) listView(width, height int) string {
 	if s.selected >= s.listTop+listHeight {
 		s.listTop = s.selected - listHeight + 1
 	}
-	end := minScreen(len(s.items), s.listTop+listHeight)
+	end := minScreen(len(matches), s.listTop+listHeight)
 	metaStyle := lipgloss.NewStyle().Faint(true)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Reverse(true)
 	for i := s.listTop; i < end; i++ {
-		item := s.items[i]
-		line := fmt.Sprintf("%2d. %s", i+1, savedTitle(item))
+		entry := matches[i]
+		item := entry.item
+		line := fmt.Sprintf("%2d. %s", entry.index+1, savedTitle(item))
 		if domain := storyDomain(item.Article.URL); domain != "" {
 			line += " (" + domain + ")"
 		}
@@ -290,7 +395,7 @@ func (s Saved) listView(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString(truncateScreen("j/k scroll | enter read | s/d delete | y copy url | r refresh", width))
+	b.WriteString(truncateScreen("j/k scroll | / search | O sort | enter read | o open | s/d delete | y copy url | r refresh", width))
 	return b.String()
 }
 
@@ -299,7 +404,7 @@ func (s Saved) articleView(width, height int) string {
 	if !ok {
 		return "Saved article not found. Press esc to go back."
 	}
-	header := []string{"esc back | s/d delete | o open in browser | y copy url | j/k move | [/ ] paragraph"}
+	header := []string{"esc back | s/d delete | o open | y copy | j/k line | left/right or p/n paragraph"}
 	if s.status != "" {
 		header = append(header, s.status)
 	}
@@ -375,6 +480,37 @@ func savedTitle(item saved.Article) string {
 		return item.Story.Title
 	}
 	return fmt.Sprintf("HN item %d", item.ID)
+}
+
+func (s Saved) filteredItems() []savedListItem {
+	items := make([]savedListItem, 0, len(s.items))
+	query := strings.ToLower(strings.TrimSpace(s.searchQuery))
+	for i, item := range s.items {
+		if query == "" || savedMatchesQuery(item, query) {
+			items = append(items, savedListItem{index: i, item: item})
+		}
+	}
+	switch s.sortMode {
+	case savedSortStoryDate:
+		sort.SliceStable(items, func(i, j int) bool {
+			return items[i].item.Story.Time > items[j].item.Story.Time
+		})
+	case savedSortTitle:
+		sort.SliceStable(items, func(i, j int) bool {
+			return strings.ToLower(savedTitle(items[i].item)) < strings.ToLower(savedTitle(items[j].item))
+		})
+	}
+	return items
+}
+
+func savedMatchesQuery(item saved.Article, query string) bool {
+	fields := []string{savedTitle(item), item.Story.By, item.Story.URL, item.Article.URL, storyDomain(savedArticleURL(item)), item.Article.Markdown}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func savedArticleURL(item saved.Article) string {

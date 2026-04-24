@@ -6,7 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/elpdev/hackernews/internal/commands"
+	"github.com/elpdev/hackernews/internal/config"
 	"github.com/elpdev/hackernews/internal/debug"
+	"github.com/elpdev/hackernews/internal/history"
 	"github.com/elpdev/hackernews/internal/hn"
 	"github.com/elpdev/hackernews/internal/saved"
 	"github.com/elpdev/hackernews/internal/screens"
@@ -40,6 +42,9 @@ type Model struct {
 	commands       *commands.Registry
 	commandPalette commands.PaletteModel
 	savedStore     saved.Store
+	historyStore   history.Store
+	configStore    config.Store
+	settings       config.Settings
 
 	theme theme.Theme
 	logs  *debug.Log
@@ -55,22 +60,48 @@ func New(meta BuildInfo) Model {
 	} else {
 		savedStore = saved.NewJSONStore(path)
 	}
+	var historyStore history.Store
+	if path, err := history.DefaultPath(); err != nil {
+		log.Warn(fmt.Sprintf("Read history unavailable: %v", err))
+	} else {
+		historyStore = history.NewJSONStore(path)
+	}
+	settings := config.Defaults()
+	var configStore config.Store
+	if meta.Version != "test" {
+		if path, err := config.DefaultPath(); err != nil {
+			log.Warn(fmt.Sprintf("Config unavailable: %v", err))
+		} else {
+			configStore = config.NewStore(path)
+			if loaded, err := configStore.Load(); err != nil {
+				log.Warn(fmt.Sprintf("Could not load config: %v", err))
+			} else {
+				settings = loaded
+			}
+		}
+	}
 
 	m := Model{
-		activeScreen: defaultScreen,
+		activeScreen: settings.DefaultFeed,
 		screens:      make(map[string]screens.Screen),
 		initialized:  make(map[string]bool),
-		showSidebar:  true,
+		showSidebar:  settings.ShowSidebar,
 		focus:        FocusMain,
 		keys:         DefaultKeyMap(),
 		commands:     commands.NewRegistry(),
 		savedStore:   savedStore,
-		theme:        theme.Phosphor(),
+		historyStore: historyStore,
+		configStore:  configStore,
+		settings:     settings,
+		theme:        themeByName(settings.ThemeName),
 		logs:         log,
 		meta:         meta,
 	}
 
 	m.registerScreens()
+	if _, ok := m.screens[m.activeScreen]; !ok {
+		m.activeScreen = defaultScreen
+	}
 	m.registerCommands()
 	m.commandPalette = commands.NewPaletteModel(m.commands, theme.BuiltIns())
 	return m
@@ -86,14 +117,15 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) registerScreens() {
-	m.screens["top"] = screens.NewStories(m.savedStore, hn.FeedTop)
-	m.screens["new"] = screens.NewStories(m.savedStore, hn.FeedNew)
-	m.screens["best"] = screens.NewStories(m.savedStore, hn.FeedBest)
-	m.screens["ask"] = screens.NewStories(m.savedStore, hn.FeedAsk)
-	m.screens["show"] = screens.NewStories(m.savedStore, hn.FeedShow)
-	m.screens["jobs"] = screens.NewStories(m.savedStore, hn.FeedJob)
+	m.screens["top"] = screens.NewStories(m.savedStore, hn.FeedTop, m.historyStore, m.settings.HideRead, m.settings.SortMode)
+	m.screens["new"] = screens.NewStories(m.savedStore, hn.FeedNew, m.historyStore, m.settings.HideRead, m.settings.SortMode)
+	m.screens["best"] = screens.NewStories(m.savedStore, hn.FeedBest, m.historyStore, m.settings.HideRead, m.settings.SortMode)
+	m.screens["ask"] = screens.NewStories(m.savedStore, hn.FeedAsk, m.historyStore, m.settings.HideRead, m.settings.SortMode)
+	m.screens["show"] = screens.NewStories(m.savedStore, hn.FeedShow, m.historyStore, m.settings.HideRead, m.settings.SortMode)
+	m.screens["jobs"] = screens.NewStories(m.savedStore, hn.FeedJob, m.historyStore, m.settings.HideRead, m.settings.SortMode)
 	m.screens["saved"] = screens.NewSaved(m.savedStore)
 	m.screens["comments"] = screens.NewComments(hn.NewClient(nil))
+	m.screens["search"] = screens.NewSearch()
 	m.refreshScreenOrder()
 }
 
@@ -104,7 +136,7 @@ func (m *Model) refreshScreenOrder() {
 	}
 	sort.Strings(m.screenOrder)
 	preferred := []string{"top", "new", "best", "ask", "show", "jobs", "saved"}
-	hidden := map[string]bool{"comments": true}
+	hidden := map[string]bool{"comments": true, "search": true}
 	ordered := make([]string, 0, len(m.screenOrder))
 	seen := make(map[string]bool)
 	for _, id := range preferred {
@@ -130,8 +162,10 @@ func (m *Model) registerCommands() {
 	m.commands.Register(commands.Command{ID: "go-show", Title: "Show HN", Description: "Open Show HN stories", Keywords: []string{"show", "show hn", "projects"}, Order: 50, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"show"} } }})
 	m.commands.Register(commands.Command{ID: "go-jobs", Title: "Jobs", Description: "Open HN job postings", Keywords: []string{"jobs", "hiring", "careers"}, Order: 60, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"jobs"} } }})
 	m.commands.Register(commands.Command{ID: "go-saved", Title: "Saved", Description: "Open saved articles", Keywords: []string{"saved", "articles", "bookmarks", "offline"}, Order: 70, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"saved"} } }})
+	m.commands.Register(commands.Command{ID: "go-search", Title: "Search Loaded Stories", Description: "Search stories already loaded in feeds", Keywords: []string{"search", "find", "loaded", "stories"}, Order: 75, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"search"} } }})
 	m.commands.Register(commands.Command{ID: "toggle-sidebar", Title: "Toggle Sidebar", Description: "Show or hide sidebar navigation", Keywords: []string{"sidebar", "layout"}, Order: 80, Run: func() tea.Cmd { return func() tea.Msg { return toggleSidebarMsg{} } }})
-	m.commands.Register(commands.Command{ID: "themes", Title: "Themes", Description: "Preview and select a theme", Keywords: []string{"theme", "themes", "appearance", "colors", "dark", "muted", "phosphor", "miami"}, Order: 90})
+	m.commands.Register(commands.Command{ID: "toggle-hide-read", Title: "Toggle Hide Read", Description: "Show or hide read stories", Keywords: []string{"read", "visited", "hide"}, Order: 85, Run: func() tea.Cmd { return func() tea.Msg { return toggleHideReadMsg{} } }})
+	m.commands.Register(commands.Command{ID: "themes", Title: "Themes", Description: "Preview and select a theme", Keywords: []string{"theme", "themes", "appearance", "colors", "dark", "muted", "phosphor", "synthwave", "neon", "retro"}, Order: 90})
 	m.commands.Register(commands.Command{ID: "quit", Title: "Quit", Description: "Exit Hackernews", Keywords: []string{"exit", "close"}, Order: 100, Run: func() tea.Cmd { return func() tea.Msg { return quitMsg{} } }})
 }
 
@@ -142,6 +176,10 @@ func (m *Model) switchScreen(id string) {
 	}
 	if m.activeScreen != id {
 		m.activeScreen = id
+		if id != "comments" && id != "search" {
+			m.settings.DefaultFeed = id
+			m.saveSettings()
+		}
 		m.logs.Info(fmt.Sprintf("Screen changed to %s", id))
 	}
 }
@@ -151,4 +189,13 @@ func (m Model) CurrentScreenID() string { return m.activeScreen }
 func (m Model) SwitchScreenForTest(id string) Model {
 	m.switchScreen(id)
 	return m
+}
+
+func themeByName(name string) theme.Theme {
+	for _, candidate := range theme.BuiltIns() {
+		if candidate.Name == name {
+			return candidate
+		}
+	}
+	return theme.Phosphor()
 }

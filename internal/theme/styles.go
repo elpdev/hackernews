@@ -3,7 +3,7 @@ package theme
 import "charm.land/lipgloss/v2"
 
 func BuiltIns() []Theme {
-	return []Theme{Phosphor(), MutedDark(), Miami()}
+	return []Theme{Phosphor(), MutedDark(), Synthwave()}
 }
 
 func Next(current string) Theme {
@@ -67,32 +67,33 @@ func Phosphor() Theme {
 	}
 }
 
-func Miami() Theme {
-	bright := lipgloss.Color("#F0E6FF")
-	muted := lipgloss.Color("#8B7BBF")
-	subtle := lipgloss.Color("#A888C9")
-	bg := lipgloss.Color("#1A0B2E")
-	selected := lipgloss.Color("#102A55")
-	divider := lipgloss.Color("#164B7A")
-	pink := lipgloss.Color("#FF2E88")
-	cyan := lipgloss.Color("#00E5FF")
-	blue := lipgloss.Color("#2D7DFF")
-	orange := lipgloss.Color("#FF8C42")
+func Synthwave() Theme {
+	bright := lipgloss.Color("#F5E6F7")
+	muted := lipgloss.Color("#8E7AB5")
+	subtle := lipgloss.Color("#6B5B8E")
+	bg := lipgloss.Color("#1A0933")
+	surface := lipgloss.Color("#2B1055")
+	selected := lipgloss.Color("#3D1E6D")
+	divider := lipgloss.Color("#4A2B7A")
+	pink := lipgloss.Color("#FF3CAC")
+	violet := lipgloss.Color("#9B5DE5")
+	cyan := lipgloss.Color("#51E2F5")
+	gold := lipgloss.Color("#FFB86C")
 
 	return Theme{
-		Name:       "Miami",
+		Name:       "Synthwave",
 		Background: bg,
 		Text:       lipgloss.NewStyle().Foreground(bright).Background(bg),
 		Muted:      lipgloss.NewStyle().Foreground(muted).Background(bg),
-		Title:      lipgloss.NewStyle().Bold(true).Foreground(pink).Background(selected),
-		Selected:   lipgloss.NewStyle().Bold(true).Foreground(cyan).Background(selected).Padding(0, 1),
-		Header:     lipgloss.NewStyle().Foreground(bright).Background(bg).Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(cyan).Padding(0, 1),
-		Sidebar:    lipgloss.NewStyle().Background(bg).Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(blue).Padding(1, 1),
+		Title:      lipgloss.NewStyle().Bold(true).Foreground(pink).Background(bg),
+		Selected:   lipgloss.NewStyle().Bold(true).Foreground(bright).Background(selected).Padding(0, 1),
+		Header:     lipgloss.NewStyle().Foreground(bright).Background(bg).Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(pink).Padding(0, 1),
+		Sidebar:    lipgloss.NewStyle().Background(bg).Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(violet).Padding(1, 1),
 		Main:       lipgloss.NewStyle().Foreground(bright).Background(bg).Padding(1, 2),
-		Footer:     lipgloss.NewStyle().Foreground(subtle).Background(bg).Border(lipgloss.NormalBorder(), true, false, false, false).BorderForeground(blue).Padding(0, 1),
-		Modal:      lipgloss.NewStyle().Foreground(bright).Background(bg).Border(lipgloss.RoundedBorder()).BorderForeground(pink).Padding(1, 2),
+		Footer:     lipgloss.NewStyle().Foreground(subtle).Background(bg).Border(lipgloss.NormalBorder(), true, false, false, false).BorderForeground(divider).Padding(0, 1),
+		Modal:      lipgloss.NewStyle().Foreground(bright).Background(surface).Border(lipgloss.RoundedBorder()).BorderForeground(pink).Padding(1, 2),
 		Border:     lipgloss.NewStyle().Foreground(divider).Background(bg),
 		Info:       lipgloss.NewStyle().Foreground(cyan).Background(bg),
-		Warn:       lipgloss.NewStyle().Foreground(orange).Background(bg),
+		Warn:       lipgloss.NewStyle().Foreground(gold).Background(bg),
 	}
 }

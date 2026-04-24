@@ -20,6 +20,7 @@ import (
 	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/browser"
 	"github.com/elpdev/hackernews/internal/clipboard"
+	"github.com/elpdev/hackernews/internal/history"
 	"github.com/elpdev/hackernews/internal/hn"
 	"github.com/elpdev/hackernews/internal/media"
 	"github.com/elpdev/hackernews/internal/saved"
@@ -44,12 +45,14 @@ type Top struct {
 	opener    func(string) error
 	copier    func(string) error
 	saved     saved.Store
+	history   history.Store
 	storyIDs  []int
 	stories   []hn.Item
 	pages     map[int][]hn.Item
 	articles  map[int]articles.Article
 	images    map[int]articleImage
 	savedIDs  map[int]bool
+	readIDs   map[int]bool
 
 	selected int
 	page     int
@@ -64,6 +67,7 @@ type Top struct {
 	searching   bool
 	searchQuery string
 	sortMode    sortMode
+	hideRead    bool
 }
 
 type sortMode int
@@ -85,9 +89,35 @@ func (m sortMode) label() string {
 	}
 }
 
+func (m sortMode) String() string {
+	s := m.label()
+	if s == "" {
+		return "default"
+	}
+	return s
+}
+
+func sortModeFromString(value string) sortMode {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "recent":
+		return sortRecent
+	case "points":
+		return sortPoints
+	default:
+		return sortDefault
+	}
+}
+
 type storyListItem struct {
 	index int
 	story hn.Item
+}
+
+type StorySnapshot struct {
+	ScreenID string
+	FeedName string
+	Rank     int
+	Story    hn.Item
 }
 
 type topStoriesLoadedMsg struct {
@@ -134,6 +164,22 @@ type articleSavedToggledMsg struct {
 
 func (m articleSavedToggledMsg) TargetScreenID() string { return m.screenID }
 
+type readIDsLoadedMsg struct {
+	screenID string
+	ids      map[int]bool
+	err      error
+}
+
+func (m readIDsLoadedMsg) TargetScreenID() string { return m.screenID }
+
+type storyMarkedReadMsg struct {
+	screenID string
+	id       int
+	err      error
+}
+
+func (m storyMarkedReadMsg) TargetScreenID() string { return m.screenID }
+
 type articleImage struct {
 	url   string
 	bytes []byte
@@ -158,9 +204,22 @@ func NewTop(stores ...saved.Store) Top {
 	return NewStories(store, hn.FeedTop)
 }
 
-func NewStories(store saved.Store, feed hn.Feed) Top {
+func NewStories(store saved.Store, feed hn.Feed, options ...any) Top {
 	if feed == "" {
 		feed = hn.FeedTop
+	}
+	var historyStore history.Store
+	var hideRead bool
+	sort := sortDefault
+	for _, option := range options {
+		switch value := option.(type) {
+		case history.Store:
+			historyStore = value
+		case bool:
+			hideRead = value
+		case string:
+			sort = sortModeFromString(value)
+		}
 	}
 	return Top{
 		feed:      feed,
@@ -169,15 +228,19 @@ func NewStories(store saved.Store, feed hn.Feed) Top {
 		opener:    browser.Open,
 		copier:    clipboard.Copy,
 		saved:     store,
+		history:   historyStore,
 		pages:     make(map[int][]hn.Item),
 		articles:  make(map[int]articles.Article),
 		images:    make(map[int]articleImage),
 		savedIDs:  make(map[int]bool),
+		readIDs:   make(map[int]bool),
 		loading:   "Loading " + strings.ToLower(feed.Title()) + "...",
+		sortMode:  sort,
+		hideRead:  hideRead,
 	}
 }
 
-func (t Top) Init() tea.Cmd { return tea.Batch(t.loadStories(), t.loadSavedIDs()) }
+func (t Top) Init() tea.Cmd { return tea.Batch(t.loadStories(), t.loadSavedIDs(), t.loadReadIDs()) }
 
 func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -247,6 +310,23 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			t.status = "Article removed from saved"
 		}
 		return t, nil
+	case readIDsLoadedMsg:
+		if msg.err != nil {
+			t.status = "Could not load read history: " + msg.err.Error()
+			return t, nil
+		}
+		t.readIDs = msg.ids
+		return t, nil
+	case storyMarkedReadMsg:
+		if msg.err != nil {
+			t.status = "Could not update read history: " + msg.err.Error()
+			return t, nil
+		}
+		if t.readIDs == nil {
+			t.readIDs = make(map[int]bool)
+		}
+		t.readIDs[msg.id] = true
+		return t, nil
 	case articleImageLoadedMsg:
 		if msg.err != nil {
 			t.images[msg.id] = articleImage{url: msg.url, err: msg.err.Error()}
@@ -278,18 +358,28 @@ func (t Top) Title() string {
 	return t.feed.Title()
 }
 
+func (t Top) Snapshot() []StorySnapshot {
+	items := t.allLoadedStories()
+	out := make([]StorySnapshot, 0, len(items))
+	for _, item := range items {
+		out = append(out, StorySnapshot{ScreenID: t.screenID(), FeedName: t.feedTitle(), Rank: item.index, Story: item.story})
+	}
+	return out
+}
+
 func (t Top) KeyBindings() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("up/k", "up")),
 		key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("down/j", "down")),
 		key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
-		key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[/]", "paragraph")),
-		key.NewBinding(key.WithKeys("left", "p"), key.WithHelp("left/p", "prev 100")),
-		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next 100")),
+		key.NewBinding(key.WithKeys("left", "p"), key.WithHelp("left/p", "prev page/paragraph")),
+		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next page/paragraph")),
 		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
-		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort / open in browser")),
+		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "cycle sort")),
+		key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "hide read")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comments")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save/unsave")),
@@ -297,6 +387,12 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
+}
+
+func (t *Top) SetHideRead(hide bool) {
+	t.hideRead = hide
+	t.selected = 0
+	t.listTop = 0
 }
 
 func (t Top) CapturesKey(msg tea.KeyPressMsg) bool {
@@ -339,9 +435,9 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			}
 		case "pgdown":
 			t.readLine += 10
-		case "]":
+		case "]", "right", "n":
 			t.readLine = nextParagraphLine(cachedArticleLines(t.readID), t.readLine)
-		case "[":
+		case "[", "left", "p":
 			t.readLine = previousParagraphLine(cachedArticleLines(t.readID), t.readLine)
 		}
 		t.readLine = clampIndex(t.readLine, cachedArticleLineCount(t.readID))
@@ -365,11 +461,16 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		t.selected = 0
 		t.listTop = 0
 		return t, nil
-	case "o":
+	case "O":
 		t.sortMode = (t.sortMode + 1) % 3
 		t.selected = 0
 		t.listTop = 0
-		return t, nil
+		return t, func() tea.Msg { return SortModeChangedMsg{Mode: t.sortMode.String()} }
+	case "h":
+		t.hideRead = !t.hideRead
+		t.selected = 0
+		t.listTop = 0
+		return t, func() tea.Msg { return HideReadToggledMsg{HideRead: t.hideRead} }
 	}
 	matches := t.sortedFilteredStories()
 	if len(matches) == 0 {
@@ -409,15 +510,17 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			return t, nil
 		}
 		story := matches[t.selected].story
+		markRead := t.markRead(story.ID)
 		if article, ok := t.articles[story.ID]; ok {
 			t.readID = story.ID
 			t.readTop = 0
 			t.readLine = 0
-			return t.startArticleImageLoad(story.ID, article)
+			t, cmd := t.startArticleImageLoad(story.ID, article)
+			return t, tea.Batch(markRead, cmd)
 		}
 		t.loading = "Fetching article..."
 		t.err = ""
-		return t, t.loadArticle(story)
+		return t, tea.Batch(markRead, t.loadArticle(story))
 	case "c":
 		story := matches[t.selected].story
 		return t, func() tea.Msg {
@@ -427,6 +530,10 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return t, t.toggleSaved(matches[t.selected].story.ID)
 	case "y":
 		t.status = t.copyArticleURL(t.articleURLForStory(matches[t.selected].story))
+	case "o":
+		story := matches[t.selected].story
+		t.status = t.openArticleURL(t.articleURLForStory(story))
+		return t, t.markRead(story.ID)
 	}
 	return t, nil
 }
@@ -522,6 +629,31 @@ func (t Top) loadSavedIDs() tea.Cmd {
 			ids[item.ID] = true
 		}
 		return savedIDsLoadedMsg{screenID: screenID, ids: ids}
+	}
+}
+
+func (t Top) loadReadIDs() tea.Cmd {
+	if t.history == nil {
+		return nil
+	}
+	screenID := t.screenID()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ids, err := t.history.ReadIDs(ctx)
+		return readIDsLoadedMsg{screenID: screenID, ids: ids, err: err}
+	}
+}
+
+func (t Top) markRead(id int) tea.Cmd {
+	if t.history == nil || id == 0 {
+		return nil
+	}
+	screenID := t.screenID()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return storyMarkedReadMsg{screenID: screenID, id: id, err: t.history.MarkRead(ctx, id)}
 	}
 }
 
@@ -876,6 +1008,15 @@ func (t Top) filteredStories() []storyListItem {
 		}
 	}
 	query := strings.ToLower(strings.TrimSpace(t.searchQuery))
+	if t.hideRead {
+		out := scope[:0]
+		for _, item := range scope {
+			if !t.readIDs[item.story.ID] {
+				out = append(out, item)
+			}
+		}
+		scope = out
+	}
 	if query == "" {
 		return scope
 	}
@@ -920,6 +1061,7 @@ func (t Top) articleView(width, height int) string {
 		saveHelp = "s unsave"
 	}
 	header := []string{"esc back | " + saveHelp + " | o open in browser | y copy url | j/k move | [/ ] paragraph"}
+	header[0] = "esc back | " + saveHelp + " | o open | y copy | j/k line | left/right or p/n paragraph"
 	if t.err != "" {
 		header = append(header, t.err)
 	}

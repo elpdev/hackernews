@@ -10,6 +10,9 @@ The app uses the official Hacker News Firebase API for story and comment data. A
 - Page through up to 500 stories, loaded 100 at a time.
 - Search the current feed by title, author, URL, and metadata.
 - Sort the current feed by default HN order, recency, or points.
+- Persist theme, sidebar, default screen, sort, and hide-read preferences.
+- Track read stories locally and optionally hide them from feeds.
+- Search across stories already loaded from all feeds.
 - Read extracted article text inside the terminal.
 - View article images inline when the terminal supports it.
 - Browse comment threads with collapse/expand and parent navigation.
@@ -96,7 +99,9 @@ Story list controls:
 | `left` / `p`, `right` / `n` | Previous or next 100 stories |
 | `/` | Search current feed |
 | `ctrl+u` | Clear search |
-| `o` | Cycle sort mode |
+| `o` | Open selected story in browser |
+| `O` | Cycle sort mode |
+| `h` | Hide or show read stories |
 | `enter` | Extract and read the selected article |
 | `c` | Open comments for the selected story |
 | `s` | Save or unsave the selected story/article |
@@ -109,6 +114,7 @@ Article reader controls:
 | --- | --- |
 | `up` / `k`, `down` / `j` | Scroll line by line |
 | `pgup`, `pgdown` | Scroll by page |
+| `left` / `p`, `right` / `n` | Jump between paragraphs |
 | `[` / `]` | Jump between paragraphs |
 | `o` | Open article URL in browser |
 | `y` | Copy article URL |
@@ -120,8 +126,12 @@ Comment controls:
 | Key | Action |
 | --- | --- |
 | `up` / `k`, `down` / `j` | Move between comments |
+| `left` / `p`, `right` / `n` | Previous or next top-level thread/search match |
 | `space` / `enter` | Collapse or expand comment thread |
-| `p` | Jump to parent comment |
+| `P` | Jump to parent comment |
+| `a` | Collapse or expand all comment threads |
+| `/` | Search comments |
+| `ctrl+u` | Clear comment search |
 | `g`, `G` | Jump to top or bottom |
 | `o` | Open HN item in browser |
 | `y` | Copy HN item URL |
@@ -130,6 +140,16 @@ Comment controls:
 
 ## Saved Articles
 
+Saved screen controls:
+
+| Key | Action |
+| --- | --- |
+| `/` | Search saved articles |
+| `ctrl+u` | Clear search |
+| `O` | Cycle sort by saved date, story date, or title |
+| `o` | Open selected article in browser |
+| `left` / `p`, `right` / `n` | Jump between paragraphs while reading |
+
 Saved articles are stored locally at:
 
 ```text
@@ -137,6 +157,8 @@ Saved articles are stored locally at:
 ```
 
 The file is written with user-only permissions. Saved entries include the HN story metadata and extracted article content so they can be revisited from the Saved screen.
+
+Read history and preferences are stored locally at `~/.hackernews/history.json` and `~/.hackernews/config.json`.
 
 ## Development
 

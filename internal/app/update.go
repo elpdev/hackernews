@@ -16,6 +16,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case routeMsg:
+		if msg.ScreenID == "search" {
+			m = m.refreshSearchScreen()
+		}
 		m.switchScreen(msg.ScreenID)
 		m.showCommandPalette = false
 		return m, m.initScreenIfNeeded(msg.ScreenID)
@@ -33,7 +36,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case toggleSidebarMsg:
 		m.showSidebar = !m.showSidebar
+		m.settings.ShowSidebar = m.showSidebar
+		m.saveSettings()
 		m.logs.Info(fmt.Sprintf("Sidebar toggled: %t", m.showSidebar))
+		return m, nil
+	case toggleHideReadMsg:
+		return m.applyHideRead(!m.settings.HideRead), nil
+	case screens.HideReadToggledMsg:
+		return m.applyHideRead(msg.HideRead), nil
+	case screens.SortModeChangedMsg:
+		m.settings.SortMode = msg.Mode
+		m.saveSettings()
 		return m, nil
 	case quitMsg:
 		m.logs.Info("Command executed: Quit")
@@ -52,6 +65,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.updateScreen(m.activeScreen, msg)
+}
+
+func (m Model) refreshSearchScreen() Model {
+	search, ok := m.screens["search"].(screens.Search)
+	if !ok {
+		return m
+	}
+	var items []screens.StorySnapshot
+	for _, screen := range m.screens {
+		if stories, ok := screen.(screens.Top); ok {
+			items = append(items, stories.Snapshot()...)
+		}
+	}
+	m.screens["search"] = search.WithItems(items)
+	return m
 }
 
 type commandsExecutedMsg struct {
@@ -142,6 +170,8 @@ func (m Model) handlePaletteAction(action commands.PaletteAction) (tea.Model, te
 		return m, nil
 	case commands.PaletteActionConfirmTheme:
 		m.theme = *action.Theme
+		m.settings.ThemeName = m.theme.Name
+		m.saveSettings()
 		m.logs.Info(fmt.Sprintf("Theme selected: %s", m.theme.Name))
 		m.showCommandPalette = false
 		m.commandPalette.Reset(m.theme.Name)
@@ -151,6 +181,24 @@ func (m Model) handlePaletteAction(action commands.PaletteAction) (tea.Model, te
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) applyHideRead(hide bool) Model {
+	m.settings.HideRead = hide
+	m.saveSettings()
+	for id, screen := range m.screens {
+		if stories, ok := screen.(screens.Top); ok {
+			stories.SetHideRead(hide)
+			m.screens[id] = stories
+		}
+	}
+	return m
+}
+
+func (m Model) saveSettings() {
+	if err := m.configStore.Save(m.settings); err != nil {
+		m.logs.Warn(fmt.Sprintf("Could not save config: %v", err))
+	}
 }
 
 func (m Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

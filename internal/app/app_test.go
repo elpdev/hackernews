@@ -59,8 +59,8 @@ func TestCommandPaletteThemeSelectionConfirmsPreview(t *testing.T) {
 	model = sendKey(t, model, tea.Key{Code: tea.KeyDown})
 	model = sendKey(t, model, tea.Key{Code: tea.KeyEnter})
 
-	if model.theme.Name != "Miami" {
-		t.Fatalf("expected confirmed Miami theme, got %q", model.theme.Name)
+	if model.theme.Name != "Synthwave" {
+		t.Fatalf("expected confirmed Synthwave theme, got %q", model.theme.Name)
 	}
 	if model.showCommandPalette {
 		t.Fatal("expected theme selection to close command palette")
