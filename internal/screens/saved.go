@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/browser"
 	"github.com/elpdev/hackernews/internal/clipboard"
 	"github.com/elpdev/hackernews/internal/media"
@@ -18,21 +19,25 @@ import (
 )
 
 type Saved struct {
-	store    saved.Store
-	opener   func(string) error
-	copier   func(string) error
-	items    []saved.Article
-	selected int
-	listTop  int
-	readID   int
-	readLine int
-	loading  string
-	err      string
-	status   string
+	store     saved.Store
+	extractor articles.Extractor
+	opener    func(string) error
+	copier    func(string) error
+	items     []saved.Article
+	selected  int
+	listTop   int
+	readID    int
+	readLine  int
+	loading   string
+	err       string
+	status    string
 
 	searching   bool
 	searchQuery string
 	sortMode    savedSortMode
+	tagEditing  bool
+	tagID       int
+	tagInput    string
 }
 
 type savedSortMode int
@@ -75,8 +80,26 @@ type savedArticleDeletedMsg struct {
 
 func (m savedArticleDeletedMsg) TargetScreenID() string { return m.screenID }
 
+type savedArticleTagsUpdatedMsg struct {
+	screenID string
+	id       int
+	tags     []string
+	err      error
+}
+
+func (m savedArticleTagsUpdatedMsg) TargetScreenID() string { return m.screenID }
+
+type savedArticleExtractedMsg struct {
+	screenID string
+	id       int
+	article  articles.Article
+	err      error
+}
+
+func (m savedArticleExtractedMsg) TargetScreenID() string { return m.screenID }
+
 func NewSaved(store saved.Store) Saved {
-	return Saved{store: store, opener: browser.Open, copier: clipboard.Copy, loading: "Loading saved articles..."}
+	return Saved{store: store, extractor: articles.NewTrafilaturaExtractor(), opener: browser.Open, copier: clipboard.Copy, loading: "Loading saved articles..."}
 }
 
 func (s Saved) Init() tea.Cmd { return s.load() }
@@ -107,6 +130,36 @@ func (s Saved) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			s.readLine = 0
 		}
 		return s, s.load()
+	case savedArticleTagsUpdatedMsg:
+		if msg.err != nil {
+			s.status = "Could not update tags: " + msg.err.Error()
+			return s, nil
+		}
+		for i := range s.items {
+			if s.items[i].ID == msg.id {
+				s.items[i].Tags = msg.tags
+				break
+			}
+		}
+		s.status = "Tags updated"
+		return s, nil
+	case savedArticleExtractedMsg:
+		s.loading = ""
+		if msg.err != nil {
+			s.status = "Could not extract saved article: " + msg.err.Error()
+			return s, nil
+		}
+		for i := range s.items {
+			if s.items[i].ID == msg.id {
+				s.items[i].Article = msg.article
+				break
+			}
+		}
+		clearArticleRenderCache(msg.id)
+		s.readID = msg.id
+		s.readLine = 0
+		s.status = "Article extracted"
+		return s, nil
 	case tea.KeyPressMsg:
 		return s.handleKey(msg)
 	}
@@ -136,6 +189,7 @@ func (s Saved) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
 		key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "cycle sort")),
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "edit tags")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comments")),
 		key.NewBinding(key.WithKeys("s", "d"), key.WithHelp("s/d", "delete")),
@@ -147,7 +201,7 @@ func (s Saved) KeyBindings() []key.Binding {
 }
 
 func (s Saved) CapturesKey(msg tea.KeyPressMsg) bool {
-	return s.searching && s.readID == 0 && msg.String() != "ctrl+c"
+	return (s.searching || s.tagEditing) && s.readID == 0 && msg.String() != "ctrl+c"
 }
 
 func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
@@ -202,6 +256,10 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, nil
 	}
 
+	if s.tagEditing {
+		return s.handleTagKey(msg)
+	}
+
 	if s.searching {
 		return s.handleSearchKey(msg)
 	}
@@ -251,10 +309,22 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			s.selected = len(matches) - 1
 		}
 	case "enter":
-		s.readID = matches[s.selected].item.ID
+		item := matches[s.selected].item
+		if strings.TrimSpace(item.Article.Markdown) == "" {
+			s.loading = "Fetching saved article..."
+			s.status = ""
+			return s, s.extractSavedArticle(item)
+		}
+		s.readID = item.ID
 		s.readLine = 0
 	case "s", "d":
 		return s, s.delete(matches[s.selected].item.ID)
+	case "t":
+		item := matches[s.selected].item
+		s.tagEditing = true
+		s.tagID = item.ID
+		s.tagInput = strings.Join(item.Tags, ", ")
+		return s, nil
 	case "y":
 		s.status = s.copyArticleURL(savedArticleURL(matches[s.selected].item))
 	case "o":
@@ -264,6 +334,35 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, func() tea.Msg {
 			return OpenCommentsMsg{Story: item.Story, ReturnTo: "saved"}
 		}
+	}
+	return s, nil
+}
+
+func (s Saved) handleTagKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		s.tagEditing = false
+		s.tagID = 0
+		s.tagInput = ""
+		return s, nil
+	case "enter":
+		id := s.tagID
+		tags := parseSavedTags(s.tagInput)
+		s.tagEditing = false
+		s.tagID = 0
+		s.tagInput = ""
+		return s, s.setTags(id, tags)
+	case "backspace", "ctrl+h":
+		if len(s.tagInput) > 0 {
+			s.tagInput = s.tagInput[:len(s.tagInput)-1]
+		}
+		return s, nil
+	case "space":
+		s.tagInput += " "
+		return s, nil
+	}
+	if len(msg.String()) == 1 {
+		s.tagInput += msg.String()
 	}
 	return s, nil
 }
@@ -326,6 +425,70 @@ func (s Saved) delete(id int) tea.Cmd {
 	}
 }
 
+func (s Saved) setTags(id int, tags []string) tea.Cmd {
+	if s.store == nil {
+		return func() tea.Msg {
+			return savedArticleTagsUpdatedMsg{screenID: "saved", id: id, tags: tags, err: fmt.Errorf("saved article store is unavailable")}
+		}
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return savedArticleTagsUpdatedMsg{screenID: "saved", id: id, tags: tags, err: s.store.SetTags(ctx, id, tags)}
+	}
+}
+
+func (s Saved) extractSavedArticle(item saved.Article) tea.Cmd {
+	if s.store == nil {
+		return func() tea.Msg {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: fmt.Errorf("saved article store is unavailable")}
+		}
+	}
+	if s.extractor == nil {
+		return func() tea.Msg {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: fmt.Errorf("article extractor is unavailable")}
+		}
+	}
+	return func() tea.Msg {
+		article, err := extractArticleForSaved(s.extractor, item)
+		if err != nil {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.store.Save(ctx, item.Story, article); err != nil {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: err}
+		}
+		return savedArticleExtractedMsg{screenID: "saved", id: item.ID, article: article}
+	}
+}
+
+func extractArticleForSaved(extractor articles.Extractor, item saved.Article) (articles.Article, error) {
+	if strings.TrimSpace(item.Story.URL) == "" && strings.TrimSpace(item.Article.URL) == "" {
+		return articles.Article{
+			Title:    savedTitle(item),
+			Author:   item.Story.By,
+			URL:      savedArticleURL(item),
+			Markdown: hnTextMarkdown(item.Story),
+		}, nil
+	}
+	url := item.Article.URL
+	if strings.TrimSpace(url) == "" {
+		url = item.Story.URL
+	}
+	article, err := extractor.Extract(url)
+	if article.Title == "" {
+		article.Title = savedTitle(item)
+	}
+	if article.Author == "" {
+		article.Author = item.Story.By
+	}
+	if strings.TrimSpace(article.URL) == "" {
+		article.URL = url
+	}
+	return article, err
+}
+
 func (s Saved) listView(width, height int) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("Saved Articles"))
@@ -357,6 +520,13 @@ func (s Saved) listView(width, height int) string {
 		}
 		b.WriteString(truncateScreen(fmt.Sprintf("%s: %s | sort: %s", label, query, s.sortMode.label()), width) + "\n")
 	}
+	if s.tagEditing {
+		input := s.tagInput
+		if input == "" {
+			input = lipgloss.NewStyle().Faint(true).Render("comma-separated tags")
+		}
+		b.WriteString(truncateScreen("Tags: "+input+"  (enter save, esc cancel)", width) + "\n")
+	}
 	if len(matches) == 0 {
 		b.WriteString(fmt.Sprintf("No saved articles match %q. Press ctrl+u to clear.\n", s.searchQuery))
 		return b.String()
@@ -383,6 +553,9 @@ func (s Saved) listView(width, height int) string {
 		if item.Story.By != "" {
 			meta += " | by " + item.Story.By
 		}
+		if len(item.Tags) > 0 {
+			meta += " | tags: " + strings.Join(item.Tags, ", ")
+		}
 		if i == s.selected {
 			title := "> " + truncateScreen(line, savedMax(0, width-2))
 			b.WriteString(selectedStyle.Render(padLine(title, width)) + "\n")
@@ -395,7 +568,7 @@ func (s Saved) listView(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString(truncateScreen("j/k scroll | / search | O sort | enter read | o open | s/d delete | y copy url | r refresh", width))
+	b.WriteString(truncateScreen("j/k scroll | / search | O sort | t tags | enter read | o open | s/d delete | y copy url | r refresh", width))
 	return b.String()
 }
 
@@ -504,13 +677,29 @@ func (s Saved) filteredItems() []savedListItem {
 }
 
 func savedMatchesQuery(item saved.Article, query string) bool {
-	fields := []string{savedTitle(item), item.Story.By, item.Story.URL, item.Article.URL, storyDomain(savedArticleURL(item)), item.Article.Markdown}
+	fields := []string{savedTitle(item), item.Story.By, item.Story.URL, item.Article.URL, storyDomain(savedArticleURL(item)), item.Article.Markdown, strings.Join(item.Tags, " ")}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(field), query) {
 			return true
 		}
 	}
 	return false
+}
+
+func parseSavedTags(input string) []string {
+	parts := strings.Split(input, ",")
+	seen := make(map[string]bool, len(parts))
+	tags := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tag := strings.ToLower(strings.TrimSpace(part))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags
 }
 
 func savedArticleURL(item saved.Article) string {

@@ -124,6 +124,8 @@ func (m *Model) registerScreens() {
 	m.screens["show"] = screens.NewStories(m.savedStore, hn.FeedShow, m.historyStore, m.settings.HideRead, m.settings.SortMode)
 	m.screens["jobs"] = screens.NewStories(m.savedStore, hn.FeedJob, m.historyStore, m.settings.HideRead, m.settings.SortMode)
 	m.screens["saved"] = screens.NewSaved(m.savedStore)
+	m.screens["settings"] = screens.NewSettings(m.settings, theme.BuiltIns())
+	m.screens["doctor"] = screens.NewDoctor(m.settings)
 	m.screens["comments"] = screens.NewComments(hn.NewClient(nil))
 	m.screens["search"] = screens.NewSearch()
 	m.refreshScreenOrder()
@@ -135,8 +137,8 @@ func (m *Model) refreshScreenOrder() {
 		m.screenOrder = append(m.screenOrder, id)
 	}
 	sort.Strings(m.screenOrder)
-	preferred := []string{"top", "new", "best", "ask", "show", "jobs", "saved"}
-	hidden := map[string]bool{"comments": true, "search": true}
+	preferred := []string{"top", "new", "best", "ask", "show", "jobs", "saved", "settings"}
+	hidden := map[string]bool{"comments": true, "search": true, "doctor": true}
 	ordered := make([]string, 0, len(m.screenOrder))
 	seen := make(map[string]bool)
 	for _, id := range preferred {
@@ -158,6 +160,7 @@ func (m *Model) registerCommands() {
 	m.commands.Register(commands.Command{ID: "browse", Title: "Browse", Description: "Feeds and story lists", Keywords: []string{"feed", "stories", "hacker news"}, Order: 10})
 	m.commands.Register(commands.Command{ID: "library", Title: "Library", Description: "Saved articles and loaded-story search", Keywords: []string{"saved", "search", "articles"}, Order: 20})
 	m.commands.Register(commands.Command{ID: "view", Title: "View", Description: "Layout and reading display options", Keywords: []string{"layout", "sidebar", "read"}, Order: 30})
+	m.commands.Register(commands.Command{ID: "settings", Title: "Settings", Description: "App preferences and configuration", Keywords: []string{"config", "preferences", "options"}, Order: 35})
 	m.commands.Register(commands.Command{ID: "sync", Title: "Sync", Description: "Git sync actions and setup", Keywords: []string{"git", "remote", "backup"}, Order: 40})
 	m.commands.Register(commands.Command{ID: "appearance", Title: "Appearance", Description: "Themes and visual settings", Keywords: []string{"theme", "colors"}, Order: 50})
 	m.commands.Register(commands.Command{ID: "system", Title: "System", Description: "App-level actions", Keywords: []string{"quit", "exit"}, Order: 60})
@@ -169,11 +172,13 @@ func (m *Model) registerCommands() {
 	m.commands.Register(commands.Command{ID: "go-jobs", ParentID: "browse", Title: "Jobs", Description: "Open HN job postings", Keywords: []string{"jobs", "hiring", "careers"}, Order: 60, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"jobs"} } }})
 	m.commands.Register(commands.Command{ID: "go-saved", ParentID: "library", Title: "Saved", Description: "Open saved articles", Keywords: []string{"saved", "articles", "bookmarks", "offline"}, Order: 10, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"saved"} } }})
 	m.commands.Register(commands.Command{ID: "go-search", ParentID: "library", Title: "Search Loaded Stories", Description: "Search stories already loaded in feeds", Keywords: []string{"search", "find", "loaded", "stories"}, Order: 20, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"search"} } }})
+	m.commands.Register(commands.Command{ID: "go-settings", ParentID: "settings", Title: "Open Settings", Description: "Open app preferences", Keywords: []string{"settings", "config", "preferences"}, Order: 10, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"settings"} } }})
 	m.commands.Register(commands.Command{ID: "toggle-sidebar", ParentID: "view", Title: "Toggle Sidebar", Description: "Show or hide sidebar navigation", Keywords: []string{"sidebar", "layout"}, Order: 10, Run: func() tea.Cmd { return func() tea.Msg { return toggleSidebarMsg{} } }})
 	m.commands.Register(commands.Command{ID: "toggle-hide-read", ParentID: "view", Title: "Toggle Hide Read", Description: "Show or hide read stories", Keywords: []string{"read", "visited", "hide"}, Order: 20, Run: func() tea.Cmd { return func() tea.Msg { return toggleHideReadMsg{} } }})
 	m.commands.Register(commands.Command{ID: "sync-now", ParentID: "sync", Title: "Sync Now", Description: "Manually sync saved and read articles", Keywords: []string{"sync", "git", "saved", "read"}, Order: 10, Run: func() tea.Cmd { return func() tea.Msg { return syncNowMsg{} } }})
 	m.commands.Register(commands.Command{ID: "setup-sync", ParentID: "sync", Title: "Setup Sync", Description: "Configure Git sync settings", Keywords: []string{"sync", "git", "remote", "setup", "config"}, Order: 20})
 	m.commands.Register(commands.Command{ID: "themes", ParentID: "appearance", Title: "Themes", Description: "Preview and select a theme", Keywords: []string{"theme", "themes", "appearance", "colors", "dark", "muted", "phosphor", "synthwave", "neon", "retro"}, Order: 10})
+	m.commands.Register(commands.Command{ID: "doctor", ParentID: "system", Title: "Doctor", Description: "Check local setup and dependencies", Keywords: []string{"diagnostics", "health", "python", "trafilatura", "git", "clipboard"}, Order: 5, Run: func() tea.Cmd { return func() tea.Msg { return openDoctorMsg{} } }})
 	m.commands.Register(commands.Command{ID: "quit", ParentID: "system", Title: "Quit", Description: "Exit Hackernews", Keywords: []string{"exit", "close"}, Order: 10, Run: func() tea.Cmd { return func() tea.Msg { return quitMsg{} } }})
 }
 
@@ -184,7 +189,7 @@ func (m *Model) switchScreen(id string) {
 	}
 	if m.activeScreen != id {
 		m.activeScreen = id
-		if id != "comments" && id != "search" {
+		if id != "comments" && id != "search" && id != "settings" && id != "doctor" {
 			m.settings.DefaultFeed = id
 			m.saveSettings()
 		}
