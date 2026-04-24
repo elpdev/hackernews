@@ -191,6 +191,44 @@ func TestInferLooseCodeLanguageSupportsRuby(t *testing.T) {
 	}
 }
 
+func TestLabelUnlabeledCodeFencesInfersRubyHeredoc(t *testing.T) {
+	markdown := strings.Join([]string{
+		"```",
+		"# Write a Ruby program:",
+		"cat > hello.rb <<'RUBY'",
+		"def fib(n)",
+		"if n < 2",
+		"n",
+		"else",
+		"fib(n - 1) + fib(n - 2)",
+		"end",
+		"end",
+		"puts fib(34)",
+		"RUBY",
+		"```",
+	}, "\n")
+
+	got := labelUnlabeledCodeFences(markdown)
+	if !strings.Contains(got, "```ruby") {
+		t.Fatalf("expected ruby fence in normalized markdown:\n%s", got)
+	}
+}
+
+func TestLabelUnlabeledCodeFencesInfersShellCommands(t *testing.T) {
+	markdown := strings.Join([]string{
+		"```",
+		"make deps # fetch libprism",
+		"make test # run feature tests",
+		"sudo make install",
+		"```",
+	}, "\n")
+
+	got := labelUnlabeledCodeFences(markdown)
+	if !strings.Contains(got, "```bash") {
+		t.Fatalf("expected bash fence in normalized markdown:\n%s", got)
+	}
+}
+
 func TestStartArticleImageLoadRestartsCachedLoadingImage(t *testing.T) {
 	articleRenderCache.lines = make(map[string][]string)
 	top := NewTop()
