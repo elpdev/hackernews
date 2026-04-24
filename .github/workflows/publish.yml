@@ -43,6 +43,25 @@ jobs:
       - name: Run Go tests
         run: go test ./...
 
+      - name: Verify package publishing secrets
+        shell: bash
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "$HOMEBREW_TAP_GITHUB_TOKEN" ]] || missing+=(HOMEBREW_TAP_GITHUB_TOKEN)
+          [[ -n "$AUR_KEY" ]] || missing+=(AUR_KEY)
+
+          if (( ${#missing[@]} > 0 )); then
+            for secret in "${missing[@]}"; do
+              printf '::error::Missing required GitHub secret: %s\n' "$secret"
+            done
+            exit 1
+          fi
+
       - name: Bump version and create tag
         id: version
         uses: mathieudutour/github-tag-action@v6.2
@@ -65,6 +84,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.new_tag }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

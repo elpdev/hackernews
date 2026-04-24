@@ -31,6 +31,28 @@ Install Trafilatura with:
 python3 -m pip install trafilatura
 ```
 
+## Install
+
+Homebrew:
+
+```sh
+brew install elpdev/tap/hackernews
+```
+
+Arch Linux via AUR with yay:
+
+```sh
+yay -S hackernews-bin
+```
+
+Or install from the AUR manually:
+
+```sh
+git clone https://aur.archlinux.org/hackernews-bin.git
+cd hackernews-bin
+makepkg -si
+```
+
 ## Run
 
 From the repository:

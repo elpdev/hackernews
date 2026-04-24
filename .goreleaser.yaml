@@ -42,6 +42,37 @@ archives:
 checksum:
   name_template: checksums.txt
 
+brews:
+  - name: hackernews
+    ids: [default]
+    directory: Formula
+    repository:
+      owner: elpdev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore: update hackernews formula to {{ .Tag }}"
+    homepage: https://github.com/elpdev/hackernews
+    description: "Terminal UI for browsing Hacker News, reading articles, comments, and saved stories"
+    license: MIT
+    install: |
+      bin.install "hackernews"
+
+aurs:
+  - name: hackernews-bin
+    ids: [default]
+    homepage: https://github.com/elpdev/hackernews
+    description: "Terminal UI for browsing Hacker News, reading articles, comments, and saved stories"
+    maintainers: ["elpdev <noreply@github.com>"]
+    license: MIT
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/hackernews-bin.git"
+    skip_upload: auto
+    package: |-
+      install -Dm755 hackernews "${pkgdir}/usr/bin/hackernews"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
