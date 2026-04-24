@@ -56,6 +56,24 @@ func TestRenderBytesITerm2(t *testing.T) {
 	}
 }
 
+func TestRenderBytesReservesImageRows(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "")
+	t.Setenv("TERM", "xterm-kitty")
+	rendered, rows, err := RenderBytes(tinyPNG(t), 20)
+	if err != nil {
+		t.Fatalf("render bytes: %v", err)
+	}
+	lines := strings.Split(rendered, "\n")
+	if len(lines) != rows {
+		t.Fatalf("expected %d reserved rows, got %d", rows, len(lines))
+	}
+	for i, line := range lines[1:] {
+		if line != " " {
+			t.Fatalf("expected reserved row %d to contain a space, got %q", i+1, line)
+		}
+	}
+}
+
 func TestRenderBytesKittyInsideTmux(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("TERM", "xterm-kitty")
@@ -71,7 +89,32 @@ func TestRenderBytesKittyInsideTmux(t *testing.T) {
 		t.Fatalf("expected kitty graphics payload, got %q", rendered)
 	}
 	if strings.Contains(rendered, "z=-1") {
-		t.Fatalf("expected kitty placement to render above background, got %q", rendered)
+		t.Fatalf("expected kitty image above opaque TUI background, got %q", rendered)
+	}
+}
+
+func TestKittyPayloadResizesLargeImages(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 1000, 800))
+	for y := 0; y < 800; y++ {
+		for x := 0; x < 1000; x++ {
+			img.Set(x, y, color.NRGBA{R: uint8(x), G: uint8(y), B: uint8(x + y), A: 255})
+		}
+	}
+	var input bytes.Buffer
+	if err := png.Encode(&input, img); err != nil {
+		t.Fatalf("encode png fixture: %v", err)
+	}
+
+	payload, err := kittyPayload(input.Bytes(), 48, 18)
+	if err != nil {
+		t.Fatalf("kitty payload: %v", err)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode payload config: %v", err)
+	}
+	if config.Width > 384 || config.Height > 288 {
+		t.Fatalf("expected resized payload, got %dx%d", config.Width, config.Height)
 	}
 }
 

@@ -24,12 +24,15 @@ type articleImage struct {
 
 func (t Top) articleView(width, height int) string {
 	article := t.articles[t.readID]
+	if t.imageURL != "" {
+		return t.articleImageView(width, height, article)
+	}
 	saveHelp := "s save"
 	if t.savedIDs[t.readID] {
 		saveHelp = "s unsave"
 	}
 	header := []string{"esc back | " + saveHelp + " | o open in browser | y copy url | j/k move | [/ ] paragraph"}
-	header[0] = "esc back | " + saveHelp + " | o open | y copy | j/k line | left/right or p/n paragraph"
+	header[0] = "esc back | " + saveHelp + " | o open | y copy | i image | j/k line | left/right or p/n paragraph"
 	if t.err != "" {
 		header = append(header, t.err)
 	}
@@ -38,15 +41,10 @@ func (t Top) articleView(width, height int) string {
 	}
 	contentHeight := maxScreen(1, height-len(header)-1)
 	contentWidth := articleContentWidth(width)
-	lines := renderedArticleLines(t.readID, contentWidth, article, t.images[t.readID])
+	lines := renderedArticleLines(t.readID, contentWidth, article, t.images[t.readID], t.bodyImages[t.readID])
 	maxTop := maxScreen(0, len(lines)-contentHeight)
 	cursor := clampIndex(t.readLine, len(lines))
-	top := cursor - contentHeight/2
-	if top < 0 {
-		top = 0
-	} else if top > maxTop {
-		top = maxTop
-	}
+	top := articleViewportTop(cursor, contentHeight, maxTop)
 	end := minScreen(len(lines), top+contentHeight)
 	var b strings.Builder
 	for _, line := range header {
@@ -62,6 +60,43 @@ func (t Top) articleView(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
+	return media.ViewportPrefix() + b.String()
+}
+
+func articleViewportTop(cursor, contentHeight, maxTop int) int {
+	if contentHeight <= 0 || maxTop <= 0 {
+		return 0
+	}
+	step := maxScreen(1, contentHeight-4)
+	top := (cursor / step) * step
+	if top > maxTop {
+		return maxTop
+	}
+	return top
+}
+
+func (t Top) articleImageView(width, height int, _ articles.Article) string {
+	header := []string{"esc close image | o open image | y copy image url"}
+	contentHeight := maxScreen(1, height-len(header)-1)
+	image := articleImage{}
+	if images := t.bodyImages[t.readID]; images != nil {
+		image = images[t.imageURL]
+	}
+	if image.url == "" {
+		image = articleImage{url: t.imageURL}
+	}
+	imageWidth := minScreen(maxScreen(12, articleContentWidth(width)-6), 72)
+	block := articleImageBlockForURL(t.imageURL, image, imageWidth)
+	lines := strings.Split(strings.TrimRight(block, "\n"), "\n")
+	if len(lines) > contentHeight {
+		lines = lines[:contentHeight]
+	}
+	var b strings.Builder
+	for _, line := range header {
+		b.WriteString(truncateScreen(line, width) + "\n")
+	}
+	b.WriteString("Image: " + t.imageURL + "\n\n")
+	b.WriteString(strings.Join(lines, "\n"))
 	return media.ViewportPrefix() + b.String()
 }
 
@@ -92,7 +127,7 @@ func padLine(line string, width int) string {
 	return line + strings.Repeat(" ", width-lineWidth)
 }
 
-func renderedArticleLines(id, width int, article articles.Article, image articleImage) []string {
+func renderedArticleLines(id, width int, article articles.Article, image articleImage, _ map[string]articleImage) []string {
 	key := fmt.Sprintf("%d:%d:%s", id, width, image.cacheKey())
 	articleRenderCache.Lock()
 	if lines, ok := articleRenderCache.lines[key]; ok {
@@ -192,7 +227,7 @@ func renderArticle(article articles.Article, image articleImage, width int) stri
 	if article.Title != "" {
 		sections = append(sections, renderMarkdown("# "+article.Title+"\n", width))
 	}
-	if block := articleImageBlock(article, image, width); block != "" {
+	if block := articleImageReferenceBlock(article, width); block != "" {
 		sections = append(sections, block)
 	}
 	hasMeta := false
@@ -202,7 +237,7 @@ func renderArticle(article articles.Article, image articleImage, width int) stri
 	}
 	hasBody := strings.TrimSpace(article.Markdown) != ""
 	if hasBody {
-		sections = append(sections, renderMarkdown(article.Markdown, width))
+		sections = append(sections, renderArticleBody(article, width))
 	} else if url := strings.TrimSpace(article.URL); url != "" {
 		sections = append(sections, renderMarkdown(articleFallbackBody(url), width))
 	}
@@ -225,6 +260,18 @@ func articleImageBlock(article articles.Article, image articleImage, width int) 
 	if imageURL == "" {
 		return ""
 	}
+	return articleImageBlockForURL(imageURL, image, width)
+}
+
+func articleImageReferenceBlock(article articles.Article, width int) string {
+	imageURL := resolveArticleImageURL(article)
+	if imageURL == "" {
+		return ""
+	}
+	return renderMarkdown("**Image 1:** "+imageURL, width)
+}
+
+func articleImageBlockForURL(imageURL string, image articleImage, width int) string {
 	if len(image.bytes) == 0 {
 		if image.err == "" {
 			return "Image: loading..."
@@ -240,6 +287,42 @@ func articleImageBlock(article articles.Article, image articleImage, width int) 
 		return "Image: " + imageURL
 	}
 	return block
+}
+
+func renderArticleBody(article articles.Article, width int) string {
+	markdown := article.Markdown
+	matches := markdownImagePattern.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return renderMarkdown(markdown, width)
+	}
+
+	sections := make([]string, 0, len(matches)*2+1)
+	pos := 0
+	imageNumber := 1
+	if resolveArticleImageURL(article) != "" {
+		imageNumber = 2
+	}
+	for _, match := range matches {
+		if match[0] > pos {
+			if text := strings.TrimSpace(markdown[pos:match[0]]); text != "" {
+				sections = append(sections, renderMarkdown(text, width))
+			}
+		}
+		rawURL := markdown[match[2]:match[3]]
+		imageURL := resolveImageURL(rawURL, article.URL)
+		if imageURL == "" {
+			imageURL = rawURL
+		}
+		sections = append(sections, renderMarkdown(fmt.Sprintf("**Image %d:** %s", imageNumber, imageURL), width))
+		imageNumber++
+		pos = match[1]
+	}
+	if pos < len(markdown) {
+		if text := strings.TrimSpace(markdown[pos:]); text != "" {
+			sections = append(sections, renderMarkdown(text, width))
+		}
+	}
+	return strings.Join(trimRenderedSections(sections), "\n\n")
 }
 
 func trimRenderedSections(sections []string) []string {

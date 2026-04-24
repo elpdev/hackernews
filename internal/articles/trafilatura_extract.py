@@ -28,6 +28,7 @@ def main():
         output_format="markdown",
         include_comments=False,
         include_tables=False,
+        include_images=True,
     )
     metadata_json = trafilatura.extract(
         downloaded,
@@ -36,6 +37,7 @@ def main():
         with_metadata=True,
         include_comments=False,
         include_tables=False,
+        include_images=True,
     )
 
     metadata = {}

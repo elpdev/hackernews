@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -143,44 +142,26 @@ func (t Top) extractArticleForStory(story hn.Item) (articles.Article, error) {
 	return article, err
 }
 
-func (t Top) startArticleImageLoad(id int, article articles.Article) (Top, tea.Cmd) {
-	imageURL := resolveArticleImageURL(article)
+func (t Top) startBodyImageLoad(id int, imageURL string) (Top, tea.Cmd) {
 	if imageURL == "" {
 		return t, nil
 	}
-	current := t.images[id]
-	if current.url == imageURL && len(current.bytes) > 0 {
+	if t.bodyImages == nil {
+		t.bodyImages = make(map[int]map[string]articleImage)
+	}
+	if t.bodyImages[id] == nil {
+		t.bodyImages[id] = make(map[string]articleImage)
+	}
+	current := t.bodyImages[id][imageURL]
+	if current.url == imageURL && (len(current.bytes) > 0 || current.err != "") {
 		return t, nil
 	}
-	t.images[id] = articleImage{url: imageURL}
-	clearArticleRenderCache(id)
+	t.bodyImages[id][imageURL] = articleImage{url: imageURL}
 	return t, t.loadArticleImage(id, imageURL)
 }
 
 func resolveArticleImageURL(article articles.Article) string {
-	imageURL := strings.TrimSpace(article.Image)
-	if imageURL == "" {
-		return ""
-	}
-	parsed, err := url.Parse(imageURL)
-	if err != nil {
-		return ""
-	}
-	if parsed.IsAbs() {
-		return parsed.String()
-	}
-	baseURL := strings.TrimSpace(article.URL)
-	if baseURL == "" {
-		if strings.HasPrefix(imageURL, "//") {
-			return "https:" + imageURL
-		}
-		return ""
-	}
-	base, err := url.Parse(baseURL)
-	if err != nil {
-		return ""
-	}
-	return base.ResolveReference(parsed).String()
+	return resolveImageURL(article.Image, article.URL)
 }
 
 func (t Top) loadArticleImage(id int, rawURL string) tea.Cmd {

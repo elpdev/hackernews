@@ -21,20 +21,21 @@ const (
 )
 
 type Top struct {
-	feed      hn.Feed
-	client    hn.Client
-	extractor articles.Extractor
-	opener    func(string) error
-	copier    func(string) error
-	saved     saved.Store
-	history   history.Store
-	storyIDs  []int
-	stories   []hn.Item
-	pages     map[int][]hn.Item
-	articles  map[int]articles.Article
-	images    map[int]articleImage
-	savedIDs  map[int]bool
-	readIDs   map[int]bool
+	feed       hn.Feed
+	client     hn.Client
+	extractor  articles.Extractor
+	opener     func(string) error
+	copier     func(string) error
+	saved      saved.Store
+	history    history.Store
+	storyIDs   []int
+	stories    []hn.Item
+	pages      map[int][]hn.Item
+	articles   map[int]articles.Article
+	images     map[int]articleImage
+	bodyImages map[int]map[string]articleImage
+	savedIDs   map[int]bool
+	readIDs    map[int]bool
 
 	selected int
 	page     int
@@ -42,6 +43,7 @@ type Top struct {
 	readID   int
 	readTop  int
 	readLine int
+	imageURL string
 	loading  string
 	err      string
 	status   string
@@ -85,21 +87,22 @@ func NewStories(store saved.Store, feed hn.Feed, options ...any) Top {
 		}
 	}
 	return Top{
-		feed:      feed,
-		client:    hn.NewClient(nil),
-		extractor: articles.NewTrafilaturaExtractor(),
-		opener:    browser.Open,
-		copier:    clipboard.Copy,
-		saved:     store,
-		history:   historyStore,
-		pages:     make(map[int][]hn.Item),
-		articles:  make(map[int]articles.Article),
-		images:    make(map[int]articleImage),
-		savedIDs:  make(map[int]bool),
-		readIDs:   make(map[int]bool),
-		loading:   "Loading " + strings.ToLower(feed.Title()) + "...",
-		sortMode:  sort,
-		hideRead:  hideRead,
+		feed:       feed,
+		client:     hn.NewClient(nil),
+		extractor:  articles.NewTrafilaturaExtractor(),
+		opener:     browser.Open,
+		copier:     clipboard.Copy,
+		saved:      store,
+		history:    historyStore,
+		pages:      make(map[int][]hn.Item),
+		articles:   make(map[int]articles.Article),
+		images:     make(map[int]articleImage),
+		bodyImages: make(map[int]map[string]articleImage),
+		savedIDs:   make(map[int]bool),
+		readIDs:    make(map[int]bool),
+		loading:    "Loading " + strings.ToLower(feed.Title()) + "...",
+		sortMode:   sort,
+		hideRead:   hideRead,
 	}
 }
 
@@ -149,7 +152,8 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		t.readID = msg.id
 		t.readTop = 0
 		t.readLine = 0
-		return t.startArticleImageLoad(msg.id, msg.article)
+		t.imageURL = ""
+		return t, nil
 	case savedIDsLoadedMsg:
 		if msg.err != nil {
 			t.status = "Could not load saved articles: " + msg.err.Error()
@@ -195,7 +199,19 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		t.readIDs[msg.id] = true
 		return t, nil
 	case articleImageLoadedMsg:
-		if msg.err != nil {
+		if current := t.images[msg.id]; current.url == msg.url {
+			if msg.err != nil {
+				t.images[msg.id] = articleImage{url: msg.url, err: msg.err.Error()}
+			} else {
+				t.images[msg.id] = articleImage{url: msg.url, bytes: msg.bytes}
+			}
+		} else if images := t.bodyImages[msg.id]; images != nil {
+			if msg.err != nil {
+				images[msg.url] = articleImage{url: msg.url, err: msg.err.Error()}
+			} else {
+				images[msg.url] = articleImage{url: msg.url, bytes: msg.bytes}
+			}
+		} else if msg.err != nil {
 			t.images[msg.id] = articleImage{url: msg.url, err: msg.err.Error()}
 		} else {
 			t.images[msg.id] = articleImage{url: msg.url, bytes: msg.bytes}

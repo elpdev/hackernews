@@ -45,6 +45,7 @@ type Model struct {
 	historyStore   history.Store
 	configStore    config.Store
 	settings       config.Settings
+	inlineMediaSeq string
 
 	theme theme.Theme
 	logs  *debug.Log
