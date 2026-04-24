@@ -682,9 +682,20 @@ func (t Top) listView(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	footer := fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | n/p next/prev 100 | j/k scroll | enter read | s save | r refresh", t.page+1, t.pageCount(), t.page*topStoriesPerPage+matches[t.listTop].index+1, t.page*topStoriesPerPage+matches[end-1].index+1, len(t.storyIDs))
-	if t.searchQuery != "" {
-		footer = fmt.Sprintf("Page %d/%d | %d matches on page | / edit search | ctrl+u clear | enter read | s save", t.page+1, t.pageCount(), len(matches))
+	loadedCount := 0
+	for _, page := range t.pages {
+		loadedCount += len(page)
+	}
+	var footer string
+	switch {
+	case t.searchQuery != "" && sortLabel != "":
+		footer = fmt.Sprintf("%d loaded | sort: %s | %d matches | o cycle sort | / edit search | ctrl+u clear | enter read | s save", loadedCount, sortLabel, len(matches))
+	case t.searchQuery != "":
+		footer = fmt.Sprintf("%d loaded | %d matches | / edit search | ctrl+u clear | o sort | enter read | s save", loadedCount, len(matches))
+	case sortLabel != "":
+		footer = fmt.Sprintf("%d loaded | sort: %s | showing %d-%d of %d | o cycle sort | / search | enter read | s save", loadedCount, sortLabel, t.listTop+1, end, len(matches))
+	default:
+		footer = fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | o sort | n/p next/prev 100 | j/k scroll | enter read | s save | r refresh", t.page+1, t.pageCount(), matches[t.listTop].index+1, matches[end-1].index+1, len(t.storyIDs))
 	}
 	b.WriteString(truncateScreen(footer, width))
 	return b.String()
