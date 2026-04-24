@@ -15,10 +15,20 @@ type Settings struct {
 	DefaultFeed string `json:"default_feed"`
 	SortMode    string `json:"sort_mode"`
 	HideRead    bool   `json:"hide_read"`
+	SyncEnabled bool   `json:"sync_enabled"`
+	SyncBackend string `json:"sync_backend"`
+	SyncRemote  string `json:"sync_remote"`
+	SyncBranch  string `json:"sync_branch"`
+	SyncDir     string `json:"sync_dir"`
 }
 
 func Defaults() Settings {
-	return Settings{ThemeName: "Phosphor", ShowSidebar: true, DefaultFeed: "top"}
+	home, _ := os.UserHomeDir()
+	syncDir := ""
+	if home != "" {
+		syncDir = filepath.Join(home, ".hackernews", "sync")
+	}
+	return Settings{ThemeName: "Phosphor", ShowSidebar: true, DefaultFeed: "top", SyncBackend: "git", SyncBranch: "main", SyncDir: syncDir}
 }
 
 type Store struct {
@@ -61,6 +71,15 @@ func (s Store) Load() (Settings, error) {
 	}
 	if settings.DefaultFeed == "" {
 		settings.DefaultFeed = Defaults().DefaultFeed
+	}
+	if settings.SyncBackend == "" {
+		settings.SyncBackend = Defaults().SyncBackend
+	}
+	if settings.SyncBranch == "" {
+		settings.SyncBranch = Defaults().SyncBranch
+	}
+	if settings.SyncDir == "" {
+		settings.SyncDir = Defaults().SyncDir
 	}
 	return settings, nil
 }

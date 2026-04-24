@@ -11,14 +11,14 @@ func TestStoreLoadDefaultsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load failed: %v", err)
 	}
-	if settings.ThemeName != "Phosphor" || !settings.ShowSidebar || settings.DefaultFeed != "top" {
+	if settings.ThemeName != "Phosphor" || !settings.ShowSidebar || settings.DefaultFeed != "top" || settings.SyncBackend != "git" || settings.SyncBranch != "main" || settings.SyncDir == "" {
 		t.Fatalf("unexpected defaults: %+v", settings)
 	}
 }
 
 func TestStoreSaveLoadRoundTrip(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "config.json"))
-	want := Settings{ThemeName: "Synthwave", ShowSidebar: false, DefaultFeed: "saved", SortMode: "points", HideRead: true}
+	want := Settings{ThemeName: "Synthwave", ShowSidebar: false, DefaultFeed: "saved", SortMode: "points", HideRead: true, SyncEnabled: true, SyncBackend: "git", SyncRemote: "git@example.com:me/hn-sync.git", SyncBranch: "main", SyncDir: filepath.Join(t.TempDir(), "sync")}
 	if err := store.Save(want); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}

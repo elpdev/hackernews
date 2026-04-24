@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elpdev/hackernews/internal/theme"
 	tea "charm.land/bubbletea/v2"
+	"github.com/elpdev/hackernews/internal/theme"
 )
 
 type PaletteModel struct {
@@ -17,6 +17,8 @@ type PaletteModel struct {
 	action   PaletteAction
 	page     palettePage
 	original string
+	sync     SyncSetup
+	field    int
 }
 
 type palettePage int
@@ -24,12 +26,20 @@ type palettePage int
 const (
 	paletteRoot palettePage = iota
 	paletteThemes
+	paletteSyncSetup
 )
+
+type SyncSetup struct {
+	Remote string
+	Branch string
+	Dir    string
+}
 
 type PaletteAction struct {
 	Type    PaletteActionType
 	Command *Command
 	Theme   *theme.Theme
+	Sync    *SyncSetup
 }
 
 type PaletteActionType int
@@ -41,6 +51,7 @@ const (
 	PaletteActionPreviewTheme
 	PaletteActionConfirmTheme
 	PaletteActionCancelTheme
+	PaletteActionConfirmSyncSetup
 )
 
 func NewPaletteModel(registry *Registry, themes []theme.Theme) PaletteModel {
@@ -54,6 +65,9 @@ func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if m.page == paletteThemes {
 			return m.updateThemes(msg), nil
+		}
+		if m.page == paletteSyncSetup {
+			return m.updateSyncSetup(msg), nil
 		}
 		switch msg.String() {
 		case "esc":
@@ -77,6 +91,10 @@ func (m PaletteModel) Update(msg tea.Msg) (PaletteModel, tea.Cmd) {
 			command := matches[m.selected]
 			if command.ID == "themes" {
 				m.openThemes()
+				return m, nil
+			}
+			if command.ID == "setup-sync" {
+				m.openSyncSetup()
 				return m, nil
 			}
 			m.executed = &command
@@ -138,9 +156,48 @@ func (m PaletteModel) updateThemes(msg tea.KeyPressMsg) PaletteModel {
 	return m
 }
 
+func (m PaletteModel) updateSyncSetup(msg tea.KeyPressMsg) PaletteModel {
+	switch msg.String() {
+	case "esc":
+		m.action = PaletteAction{Type: PaletteActionClose}
+		return m
+	case "up", "ctrl+p":
+		if m.field > 0 {
+			m.field--
+		}
+		return m
+	case "down", "ctrl+n", "tab":
+		if m.field < 2 {
+			m.field++
+		}
+		return m
+	case "enter":
+		if m.field < 2 {
+			m.field++
+			return m
+		}
+		setup := m.sync
+		m.action = PaletteAction{Type: PaletteActionConfirmSyncSetup, Sync: &setup}
+		return m
+	case "backspace", "ctrl+h":
+		m.removeSyncRune()
+		return m
+	case "space":
+		m.appendSyncRune(" ")
+		return m
+	}
+	if len(msg.String()) == 1 {
+		m.appendSyncRune(msg.String())
+	}
+	return m
+}
+
 func (m PaletteModel) View(t theme.Theme) string {
 	if m.page == paletteThemes {
 		return m.themeView(t)
+	}
+	if m.page == paletteSyncSetup {
+		return m.syncSetupView(t)
 	}
 
 	matches := m.matches()
@@ -194,6 +251,30 @@ func (m PaletteModel) themeView(t theme.Theme) string {
 	return t.Modal.Width(62).Render(b.String())
 }
 
+func (m PaletteModel) syncSetupView(t theme.Theme) string {
+	labels := []string{"Git remote", "Branch", "Sync dir"}
+	values := []string{m.sync.Remote, m.sync.Branch, m.sync.Dir}
+	var b strings.Builder
+	b.WriteString(t.Title.Render("Command Palette / Setup Sync"))
+	b.WriteString("\n")
+	b.WriteString(t.Muted.Render("Enter advances fields, final enter saves, esc cancels."))
+	b.WriteString("\n\n")
+	for i, label := range labels {
+		value := values[i]
+		if value == "" {
+			value = t.Muted.Render("empty")
+		}
+		line := fmt.Sprintf("%-11s %s", label+":", value)
+		if i == m.field {
+			line = t.Selected.Render(line)
+		} else {
+			line = t.Text.Render("  " + line)
+		}
+		b.WriteString(line + "\n")
+	}
+	return t.Modal.Width(72).Render(b.String())
+}
+
 func (m *PaletteModel) Reset(currentTheme string) {
 	m.query = ""
 	m.selected = 0
@@ -201,6 +282,7 @@ func (m *PaletteModel) Reset(currentTheme string) {
 	m.action = PaletteAction{}
 	m.page = paletteRoot
 	m.original = currentTheme
+	m.field = 0
 }
 
 func (m PaletteModel) ExecutedCommand() *Command { return m.executed }
@@ -215,6 +297,51 @@ func (m *PaletteModel) openThemes() {
 	m.page = paletteThemes
 	m.query = ""
 	m.selected = m.themeIndex(m.original)
+}
+
+func (m *PaletteModel) openSyncSetup() {
+	m.page = paletteSyncSetup
+	m.query = ""
+	m.selected = 0
+	m.field = 0
+	if m.sync.Branch == "" {
+		m.sync.Branch = "main"
+	}
+	if m.sync.Dir == "" {
+		m.sync.Dir = "~/.hackernews/sync"
+	}
+}
+
+func (m *PaletteModel) SetSyncSetup(setup SyncSetup) {
+	m.sync = setup
+}
+
+func (m *PaletteModel) appendSyncRune(value string) {
+	switch m.field {
+	case 0:
+		m.sync.Remote += value
+	case 1:
+		m.sync.Branch += value
+	case 2:
+		m.sync.Dir += value
+	}
+}
+
+func (m *PaletteModel) removeSyncRune() {
+	switch m.field {
+	case 0:
+		if len(m.sync.Remote) > 0 {
+			m.sync.Remote = m.sync.Remote[:len(m.sync.Remote)-1]
+		}
+	case 1:
+		if len(m.sync.Branch) > 0 {
+			m.sync.Branch = m.sync.Branch[:len(m.sync.Branch)-1]
+		}
+	case 2:
+		if len(m.sync.Dir) > 0 {
+			m.sync.Dir = m.sync.Dir[:len(m.sync.Dir)-1]
+		}
+	}
 }
 
 func (m *PaletteModel) previewSelectedTheme() {

@@ -162,6 +162,28 @@ The file is written with user-only permissions. Saved entries include the HN sto
 
 Read history and preferences are stored locally at `~/.hackernews/history.json` and `~/.hackernews/config.json`.
 
+## Manual Git Sync
+
+Saved articles and read history can be synced manually through a private Git repository.
+
+1. Create a private Git repository on your Git host.
+2. Open the command palette with `ctrl+k`.
+3. Run `Setup Sync`.
+4. Enter the Git remote, branch, and local sync directory.
+5. Run `Sync Now` whenever you want to pull, merge, commit, and push state.
+
+The setup command writes sync settings to `~/.hackernews/config.json`. Git authentication is handled by your local Git setup, so SSH remotes such as `git@github.com:you/hackernews-sync.git` work without storing tokens in Hackernews.
+
+The sync repository stores:
+
+```text
+saved.json
+history.json
+deleted_saved.json
+```
+
+`deleted_saved.json` prevents articles deleted on one computer from reappearing after syncing from another computer.
+
 ## Development
 
 Run tests:
