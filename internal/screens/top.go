@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/articles"
+	"github.com/elpdev/hackernews/internal/browser"
 	"github.com/elpdev/hackernews/internal/hn"
 	"github.com/elpdev/hackernews/internal/media"
 	"github.com/elpdev/hackernews/internal/saved"
@@ -38,6 +39,7 @@ const (
 type Top struct {
 	client    hn.Client
 	extractor articles.Extractor
+	opener    func(string) error
 	saved     saved.Store
 	storyIDs  []int
 	stories   []hn.Item
@@ -135,6 +137,7 @@ func NewTop(stores ...saved.Store) Top {
 	return Top{
 		client:    hn.NewClient(nil),
 		extractor: articles.NewTrafilaturaExtractor(),
+		opener:    browser.Open,
 		saved:     store,
 		pages:     make(map[int][]hn.Item),
 		articles:  make(map[int]articles.Article),
@@ -183,9 +186,9 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		t.loading = ""
 		if msg.err != nil {
 			t.err = msg.err.Error()
-			return t, nil
+		} else {
+			t.err = ""
 		}
-		t.err = ""
 		t.articles[msg.id] = msg.article
 		t.readID = msg.id
 		t.readTop = 0
@@ -250,7 +253,7 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next 100")),
 		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
-		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
+		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort / open in browser")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save/unsave")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
@@ -267,6 +270,9 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		switch msg.String() {
 		case "s":
 			return t, t.toggleSaved(t.readID)
+		case "o":
+			t.status = t.openArticleURL(t.articles[t.readID].URL)
+			return t, nil
 		case "esc":
 			t.readID = 0
 			t.readTop = 0
@@ -514,6 +520,19 @@ func (t Top) loadStoryPage(page int) tea.Cmd {
 	}
 }
 
+func (t Top) openArticleURL(url string) string {
+	if strings.TrimSpace(url) == "" {
+		return "No URL to open"
+	}
+	if t.opener == nil {
+		return "Could not open browser: no opener configured"
+	}
+	if err := t.opener(url); err != nil {
+		return "Could not open browser: " + err.Error()
+	}
+	return "Opening in browser..."
+}
+
 func (t Top) loadArticle(story hn.Item) tea.Cmd {
 	return func() tea.Msg {
 		if strings.TrimSpace(story.URL) == "" {
@@ -530,6 +549,9 @@ func (t Top) loadArticle(story hn.Item) tea.Cmd {
 		}
 		if article.Author == "" {
 			article.Author = story.By
+		}
+		if strings.TrimSpace(article.URL) == "" {
+			article.URL = story.URL
 		}
 		return articleLoadedMsg{id: story.ID, article: article, err: err}
 	}
@@ -777,7 +799,7 @@ func (t Top) articleView(width, height int) string {
 	if t.savedIDs[t.readID] {
 		saveHelp = "s unsave"
 	}
-	header := []string{"esc back | " + saveHelp + " | j/k move highlight | pgup/pgdn jump"}
+	header := []string{"esc back | " + saveHelp + " | o open in browser | j/k move highlight | pgup/pgdn jump"}
 	if t.err != "" {
 		header = append(header, t.err)
 	}
@@ -924,12 +946,21 @@ func renderArticle(article articles.Article, image articleImage, width int) stri
 	hasBody := strings.TrimSpace(article.Markdown) != ""
 	if hasBody {
 		sections = append(sections, renderMarkdown(article.Markdown, width))
+	} else if url := strings.TrimSpace(article.URL); url != "" {
+		sections = append(sections, renderMarkdown(articleFallbackBody(url), width))
 	}
 	trimmed := trimRenderedSections(sections)
 	if hasMeta && hasBody && len(trimmed) >= 2 {
 		return strings.Join(trimmed[:len(trimmed)-1], "\n") + "\n\n" + trimmed[len(trimmed)-1]
 	}
 	return strings.Join(trimmed, "\n")
+}
+
+func articleFallbackBody(url string) string {
+	return "---\n\n" +
+		"Couldn't extract readable content from this page.\n\n" +
+		"Press `o` to open in your browser:\n\n" +
+		url + "\n"
 }
 
 func articleImageBlock(article articles.Article, image articleImage, width int) string {

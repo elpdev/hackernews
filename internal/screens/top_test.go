@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -442,6 +443,128 @@ func updateTopWithKey(t *testing.T, top Top, key tea.Key) Top {
 	t.Helper()
 	updated, _ := top.Update(tea.KeyPressMsg(key))
 	return updated.(Top)
+}
+
+func TestArticleLoadedMsgWithErrorStillOpensReader(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+
+	msg := articleLoadedMsg{
+		id: 42,
+		article: articles.Article{
+			Title: "Broken page",
+			URL:   "https://example.com/spa",
+		},
+		err: errors.New("trafilatura did not find readable article content"),
+	}
+	updated, _ := top.Update(msg)
+	got := updated.(Top)
+
+	if got.readID != 42 {
+		t.Fatalf("expected reader to open on extraction error, readID=%d", got.readID)
+	}
+	if got.err == "" {
+		t.Fatal("expected error surfaced in header")
+	}
+	stored, ok := got.articles[42]
+	if !ok {
+		t.Fatal("expected article record populated even on error")
+	}
+	if stored.URL != "https://example.com/spa" {
+		t.Fatalf("expected article URL preserved, got %q", stored.URL)
+	}
+}
+
+func TestRenderArticleFallbackBodyWhenMarkdownEmpty(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	article := articles.Article{
+		Title: "Broken page",
+		URL:   "https://example.com/spa",
+	}
+
+	lines := renderedArticleLines(101, 80, article, articleImage{})
+	body := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(body, "Couldn't extract readable content") {
+		t.Fatalf("expected fallback copy in %q", body)
+	}
+	if !strings.Contains(body, "https://example.com/spa") {
+		t.Fatalf("expected URL in fallback body, got %q", body)
+	}
+	if !strings.Contains(body, "o") {
+		t.Fatalf("expected hint to press o, got %q", body)
+	}
+}
+
+func TestRenderArticleNoFallbackWhenBodyPresent(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	article := articles.Article{
+		Title:    "Story",
+		URL:      "https://example.com/story",
+		Markdown: "Article body.",
+	}
+
+	lines := renderedArticleLines(102, 80, article, articleImage{})
+	body := ansi.Strip(strings.Join(lines, "\n"))
+	if strings.Contains(body, "Couldn't extract") {
+		t.Fatalf("did not expect fallback copy when body present: %q", body)
+	}
+}
+
+func TestArticleOpenKeyInvokesOpener(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+	var gotURL string
+	var calls int
+	top.opener = func(url string) error {
+		calls++
+		gotURL = url
+		return nil
+	}
+	top.articles[7] = articles.Article{URL: "https://example.com/x"}
+	top.readID = 7
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+
+	if calls != 1 {
+		t.Fatalf("expected opener called once, got %d", calls)
+	}
+	if gotURL != "https://example.com/x" {
+		t.Fatalf("expected URL forwarded to opener, got %q", gotURL)
+	}
+	if top.status != "Opening in browser..." {
+		t.Fatalf("expected success status, got %q", top.status)
+	}
+}
+
+func TestArticleOpenKeySurfacesOpenerError(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+	top.opener = func(string) error { return errors.New("xdg-open not found") }
+	top.articles[8] = articles.Article{URL: "https://example.com/y"}
+	top.readID = 8
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+
+	if !strings.Contains(top.status, "xdg-open not found") {
+		t.Fatalf("expected opener error in status, got %q", top.status)
+	}
+}
+
+func TestArticleOpenKeyWithoutURLGivesStatus(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+	top.opener = func(string) error {
+		t.Fatal("opener should not be called without URL")
+		return nil
+	}
+	top.articles[9] = articles.Article{}
+	top.readID = 9
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "o", Code: 'o'})
+
+	if top.status != "No URL to open" {
+		t.Fatalf("expected 'No URL to open', got %q", top.status)
+	}
 }
 
 func lineIndex(lines []string, needle string) int {

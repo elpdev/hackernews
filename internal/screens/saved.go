@@ -10,12 +10,14 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/elpdev/hackernews/internal/browser"
 	"github.com/elpdev/hackernews/internal/media"
 	"github.com/elpdev/hackernews/internal/saved"
 )
 
 type Saved struct {
 	store    saved.Store
+	opener   func(string) error
 	items    []saved.Article
 	selected int
 	listTop  int
@@ -37,7 +39,7 @@ type savedArticleDeletedMsg struct {
 }
 
 func NewSaved(store saved.Store) Saved {
-	return Saved{store: store, loading: "Loading saved articles..."}
+	return Saved{store: store, opener: browser.Open, loading: "Loading saved articles..."}
 }
 
 func (s Saved) Init() tea.Cmd { return s.load() }
@@ -94,6 +96,7 @@ func (s Saved) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("s", "d"), key.WithHelp("s/d", "delete")),
+		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
@@ -108,6 +111,13 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			return s, nil
 		case "s", "d":
 			return s, s.delete(s.readID)
+		case "o":
+			if item, ok := s.itemByID(s.readID); ok {
+				s.status = s.openArticleURL(item.Article.URL)
+			} else {
+				s.status = "No URL to open"
+			}
+			return s, nil
 		case "up", "k":
 			if s.readLine > 0 {
 				s.readLine--
@@ -251,7 +261,7 @@ func (s Saved) articleView(width, height int) string {
 	if !ok {
 		return "Saved article not found. Press esc to go back."
 	}
-	header := []string{"esc back | s/d delete | j/k move highlight | pgup/pgdn jump"}
+	header := []string{"esc back | s/d delete | o open in browser | j/k move highlight | pgup/pgdn jump"}
 	if s.status != "" {
 		header = append(header, s.status)
 	}
@@ -282,6 +292,19 @@ func (s Saved) articleView(width, height int) string {
 		}
 	}
 	return media.ViewportPrefix() + b.String()
+}
+
+func (s Saved) openArticleURL(url string) string {
+	if strings.TrimSpace(url) == "" {
+		return "No URL to open"
+	}
+	if s.opener == nil {
+		return "Could not open browser: no opener configured"
+	}
+	if err := s.opener(url); err != nil {
+		return "Could not open browser: " + err.Error()
+	}
+	return "Opening in browser..."
 }
 
 func (s Saved) itemByID(id int) (saved.Article, bool) {
