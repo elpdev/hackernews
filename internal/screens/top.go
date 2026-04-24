@@ -1237,6 +1237,7 @@ func isBlankRenderedLine(line string) bool {
 func renderMarkdown(markdown string, width int) string {
 	markdown = repairLooseListItems(markdown)
 	markdown = fenceLooseArticleCode(markdown)
+	markdown = labelUnlabeledCodeFences(markdown)
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(maxScreen(20, width)),
@@ -1273,6 +1274,41 @@ func repairLooseListItems(markdown string) string {
 		out = append(out, item)
 	}
 	return strings.Join(out, "\n")
+}
+
+func labelUnlabeledCodeFences(markdown string) string {
+	lines := strings.Split(markdown, "\n")
+	out := make([]string, 0, len(lines))
+	inFence := false
+	fenceStart := -1
+	fenceMarker := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inFence {
+			out = append(out, line)
+			if isUnlabeledCodeFence(trimmed) {
+				inFence = true
+				fenceStart = len(out) - 1
+				fenceMarker = trimmed[:3]
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, fenceMarker) {
+			if lang := inferCodeBlockLanguage(out[fenceStart+1:]); lang != "" {
+				out[fenceStart] = fenceMarker + lang
+			}
+			inFence = false
+			fenceStart = -1
+			fenceMarker = ""
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+func isUnlabeledCodeFence(line string) bool {
+	return line == "```" || line == "~~~"
 }
 
 func isMarkdownListItem(line string) bool {
@@ -1448,16 +1484,92 @@ func looseIndentDelta(line string) int {
 func looseCodeLanguages(lines []string) []string {
 	langs := make([]string, 0, 3)
 	for _, line := range lines {
-		switch strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-"))) {
-		case "curl", "shell", "bash", "sh":
-			langs = append(langs, "bash")
-		case "python", "py":
-			langs = append(langs, "python")
-		case "nodejs", "node", "javascript", "js", "typescript", "ts":
-			langs = append(langs, "javascript")
+		if lang := normalizeCodeLanguage(line); lang != "" {
+			langs = append(langs, lang)
 		}
 	}
 	return langs
+}
+
+func normalizeCodeLanguage(line string) string {
+	lang := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-")))
+	lang = strings.Trim(lang, "`:")
+	switch lang {
+	case "curl", "shell", "bash", "sh", "zsh", "fish", "terminal", "console":
+		return "bash"
+	case "python", "py":
+		return "python"
+	case "nodejs", "node", "javascript", "js", "typescript", "ts":
+		return "javascript"
+	case "ruby", "rb", "rails":
+		return "ruby"
+	case "golang", "go":
+		return "go"
+	case "rust", "rs":
+		return "rust"
+	case "java":
+		return "java"
+	case "c", "cpp", "c++", "cc", "h", "hpp":
+		return "cpp"
+	case "c#", "csharp", "cs":
+		return "csharp"
+	case "kotlin", "kt":
+		return "kotlin"
+	case "yaml", "yml":
+		return "yaml"
+	case "php", "swift", "scala", "sql", "html", "css", "json", "xml", "toml", "dockerfile":
+		return lang
+	default:
+		return ""
+	}
+}
+
+func inferCodeBlockLanguage(lines []string) string {
+	var bashScore, rubyScore, goScore, rustScore, cScore int
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.Contains(trimmed, "<<'RUBY'"), strings.Contains(trimmed, "<<\"RUBY\""), strings.Contains(trimmed, "<<RUBY"):
+			rubyScore += 4
+		case strings.HasPrefix(trimmed, "def "), strings.HasPrefix(trimmed, "class "), strings.HasPrefix(trimmed, "module "), strings.HasPrefix(trimmed, "require "), strings.HasPrefix(trimmed, "puts "):
+			rubyScore += 3
+		case strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "attr_"):
+			rubyScore += 2
+		case strings.HasPrefix(trimmed, "package "), strings.HasPrefix(trimmed, "func "), strings.HasPrefix(trimmed, "type ") && strings.Contains(trimmed, " struct"):
+			goScore += 3
+		case strings.HasPrefix(trimmed, "use "), strings.HasPrefix(trimmed, "fn "), strings.HasPrefix(trimmed, "impl "), strings.HasPrefix(trimmed, "let mut "):
+			rustScore += 3
+		case strings.HasPrefix(trimmed, "#include"), strings.HasPrefix(trimmed, "int main"), strings.HasPrefix(trimmed, "static "):
+			cScore += 3
+		case strings.HasPrefix(lower, "make"), strings.HasPrefix(trimmed, "./"), strings.HasPrefix(lower, "sudo "), strings.HasPrefix(lower, "cat >"), strings.HasPrefix(trimmed, "$"):
+			bashScore += 2
+		case strings.HasPrefix(trimmed, "#"):
+			bashScore++
+		}
+	}
+	if rubyScore >= 4 && rubyScore >= bashScore {
+		return "ruby"
+	}
+	if bashScore >= 2 {
+		return "bash"
+	}
+	if rubyScore >= 3 {
+		return "ruby"
+	}
+	if goScore >= 3 {
+		return "go"
+	}
+	if rustScore >= 3 {
+		return "rust"
+	}
+	if cScore >= 3 {
+		return "cpp"
+	}
+	return ""
 }
 
 func isLooseCodeStart(line string) bool {
@@ -1477,6 +1589,14 @@ func inferLooseCodeLanguage(line string) string {
 		return "python"
 	case strings.HasPrefix(code, "//"), strings.HasPrefix(code, "const "), strings.HasPrefix(code, "let "), strings.HasPrefix(code, "async function"):
 		return "javascript"
+	case strings.HasPrefix(code, "require "), strings.HasPrefix(code, "module "), strings.HasPrefix(code, "def "), strings.HasPrefix(code, "puts "):
+		return "ruby"
+	case strings.HasPrefix(code, "class ") && !strings.Contains(code, "{"):
+		return "ruby"
+	case strings.HasPrefix(code, "package main"), strings.HasPrefix(code, "func "):
+		return "go"
+	case strings.HasPrefix(code, "use "), strings.HasPrefix(code, "fn "), strings.HasPrefix(code, "impl "):
+		return "rust"
 	default:
 		return ""
 	}

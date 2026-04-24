@@ -114,6 +114,7 @@ func TestFenceLooseArticleCodeAddsLanguageFences(t *testing.T) {
 		"- curl",
 		"- python",
 		"- nodejs",
+		"- ruby",
 		"",
 		"`curl https://api.deepseek.com/chat/completions \\",
 		"-H \"Content-Type: application/json\" \\",
@@ -136,10 +137,15 @@ func TestFenceLooseArticleCodeAddsLanguageFences(t *testing.T) {
 		"const openai = new OpenAI({",
 		"baseURL: 'https://api.deepseek.com',",
 		"});",
+		"",
+		"`class User`",
+		"def initialize(name)",
+		"@name = name",
+		"end",
 	}, "\n")
 
 	got := fenceLooseArticleCode(markdown)
-	for _, want := range []string{"```bash", "```python", "```javascript"} {
+	for _, want := range []string{"```bash", "```python", "```javascript", "```ruby"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in normalized markdown:\n%s", want, got)
 		}
@@ -155,6 +161,71 @@ func TestFenceLooseArticleCodeAddsLanguageFences(t *testing.T) {
 	}
 	if !strings.Contains(got, "const openai = new OpenAI({\n  baseURL: 'https://api.deepseek.com',\n});") {
 		t.Fatalf("expected bracketed code to be indented:\n%s", got)
+	}
+}
+
+func TestNormalizeCodeLanguageSupportsCommonAliases(t *testing.T) {
+	tests := map[string]string{
+		"- ruby":       "ruby",
+		"- rb":         "ruby",
+		"- go":         "go",
+		"- golang":     "go",
+		"- rust":       "rust",
+		"- rs":         "rust",
+		"- typescript": "javascript",
+		"- yml":        "yaml",
+		"- kt":         "kotlin",
+	}
+	for input, want := range tests {
+		if got := normalizeCodeLanguage(input); got != want {
+			t.Fatalf("normalizeCodeLanguage(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestInferLooseCodeLanguageSupportsRuby(t *testing.T) {
+	for _, line := range []string{"`require \"json\"`", "`class User`", "`def call`", "`puts user.name`"} {
+		if got := inferLooseCodeLanguage(line); got != "ruby" {
+			t.Fatalf("inferLooseCodeLanguage(%q) = %q, want ruby", line, got)
+		}
+	}
+}
+
+func TestLabelUnlabeledCodeFencesInfersRubyHeredoc(t *testing.T) {
+	markdown := strings.Join([]string{
+		"```",
+		"# Write a Ruby program:",
+		"cat > hello.rb <<'RUBY'",
+		"def fib(n)",
+		"if n < 2",
+		"n",
+		"else",
+		"fib(n - 1) + fib(n - 2)",
+		"end",
+		"end",
+		"puts fib(34)",
+		"RUBY",
+		"```",
+	}, "\n")
+
+	got := labelUnlabeledCodeFences(markdown)
+	if !strings.Contains(got, "```ruby") {
+		t.Fatalf("expected ruby fence in normalized markdown:\n%s", got)
+	}
+}
+
+func TestLabelUnlabeledCodeFencesInfersShellCommands(t *testing.T) {
+	markdown := strings.Join([]string{
+		"```",
+		"make deps # fetch libprism",
+		"make test # run feature tests",
+		"sudo make install",
+		"```",
+	}, "\n")
+
+	got := labelUnlabeledCodeFences(markdown)
+	if !strings.Contains(got, "```bash") {
+		t.Fatalf("expected bash fence in normalized markdown:\n%s", got)
 	}
 }
 

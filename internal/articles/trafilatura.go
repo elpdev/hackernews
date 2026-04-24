@@ -2,15 +2,17 @@ package articles
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
+
+//go:embed trafilatura_extract.py
+var embeddedTrafilaturaScript string
 
 type TrafilaturaExtractor struct {
 	Python string
@@ -19,14 +21,8 @@ type TrafilaturaExtractor struct {
 }
 
 func NewTrafilaturaExtractor() TrafilaturaExtractor {
-	_, file, _, ok := runtime.Caller(0)
-	script := filepath.Join("internal", "articles", "trafilatura_extract.py")
-	if ok {
-		script = filepath.Join(filepath.Dir(file), "trafilatura_extract.py")
-	}
 	return TrafilaturaExtractor{
 		Python: "python3",
-		Script: script,
 		Limit:  30 * time.Second,
 	}
 }
@@ -40,9 +36,6 @@ func (e TrafilaturaExtractor) Extract(url string) (Article, error) {
 		python = "python3"
 	}
 	script := e.Script
-	if script == "" {
-		script = filepath.Join("internal", "articles", "trafilatura_extract.py")
-	}
 	limit := e.Limit
 	if limit <= 0 {
 		limit = 30 * time.Second
@@ -50,7 +43,8 @@ func (e TrafilaturaExtractor) Extract(url string) (Article, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, python, script, url)
+	args := trafilaturaCommandArgs(script, url)
+	cmd := exec.CommandContext(ctx, python, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -71,4 +65,11 @@ func (e TrafilaturaExtractor) Extract(url string) (Article, error) {
 		return Article{}, errors.New("trafilatura did not find readable article content")
 	}
 	return article, nil
+}
+
+func trafilaturaCommandArgs(script, url string) []string {
+	if strings.TrimSpace(script) != "" {
+		return []string{script, url}
+	}
+	return []string{"-c", embeddedTrafilaturaScript, url}
 }
