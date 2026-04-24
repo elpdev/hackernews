@@ -1,12 +1,16 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/elpdev/hackernews/internal/commands"
 	"github.com/elpdev/hackernews/internal/screens"
+	hnsync "github.com/elpdev/hackernews/internal/sync"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -42,6 +46,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case toggleHideReadMsg:
 		return m.applyHideRead(!m.settings.HideRead), nil
+	case syncNowMsg:
+		m.logs.Info("Manual sync started")
+		return m, m.syncNow()
+	case syncCompletedMsg:
+		if msg.Err != nil {
+			m.logs.Warn(fmt.Sprintf("Sync failed: %v", msg.Err))
+			return m, nil
+		}
+		if msg.Committed {
+			m.logs.Info(fmt.Sprintf("Sync complete: %d saved, %d read", msg.SavedCount, msg.ReadCount))
+		} else {
+			m.logs.Info(fmt.Sprintf("Sync complete with no remote changes: %d saved, %d read", msg.SavedCount, msg.ReadCount))
+		}
+		if _, ok := m.screens[m.activeScreen].(screens.Top); ok {
+			return m, m.screens[m.activeScreen].Init()
+		}
+		if m.activeScreen == "saved" {
+			return m, m.screens[m.activeScreen].Init()
+		}
+		return m, nil
 	case screens.HideReadToggledMsg:
 		return m.applyHideRead(msg.HideRead), nil
 	case screens.SortModeChangedMsg:
@@ -124,6 +148,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Commands):
 		m.showCommandPalette = true
 		m.commandPalette.Reset(m.theme.Name)
+		m.commandPalette.SetSyncSetup(commands.SyncSetup{Remote: m.settings.SyncRemote, Branch: m.settings.SyncBranch, Dir: m.settings.SyncDir})
 		return m, nil
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = true
@@ -176,11 +201,50 @@ func (m Model) handlePaletteAction(action commands.PaletteAction) (tea.Model, te
 		m.showCommandPalette = false
 		m.commandPalette.Reset(m.theme.Name)
 		return m, nil
+	case commands.PaletteActionConfirmSyncSetup:
+		if action.Sync == nil {
+			return m, nil
+		}
+		remote := strings.TrimSpace(action.Sync.Remote)
+		branch := strings.TrimSpace(action.Sync.Branch)
+		dir := strings.TrimSpace(action.Sync.Dir)
+		if branch == "" {
+			branch = "main"
+		}
+		if dir == "" {
+			dir = m.settings.SyncDir
+		}
+		m.settings.SyncEnabled = remote != ""
+		m.settings.SyncBackend = "git"
+		m.settings.SyncRemote = remote
+		m.settings.SyncBranch = branch
+		m.settings.SyncDir = dir
+		m.saveSettings()
+		m.logs.Info("Sync settings saved")
+		m.showCommandPalette = false
+		m.commandPalette.Reset(m.theme.Name)
+		return m, nil
 	case commands.PaletteActionCancelTheme:
 		m.theme = *action.Theme
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) syncNow() tea.Cmd {
+	settings := m.settings
+	return func() tea.Msg {
+		if !settings.SyncEnabled || strings.TrimSpace(settings.SyncRemote) == "" {
+			return syncCompletedMsg{Err: fmt.Errorf("sync is not configured; run Setup Sync first")}
+		}
+		if settings.SyncBackend != "" && settings.SyncBackend != "git" {
+			return syncCompletedMsg{Err: fmt.Errorf("unsupported sync backend %q", settings.SyncBackend)}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		result, err := hnsync.SyncNow(ctx, hnsync.Options{Remote: settings.SyncRemote, Branch: settings.SyncBranch, Dir: settings.SyncDir})
+		return syncCompletedMsg{SavedCount: result.SavedCount, ReadCount: result.ReadCount, DeletedCount: result.DeletedCount, Committed: result.Committed, Err: err}
+	}
 }
 
 func (m Model) applyHideRead(hide bool) Model {
