@@ -605,7 +605,7 @@ func (t Top) loadArticleImage(id int, rawURL string) tea.Cmd {
 func (t Top) listView(width, height int) string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("Top Hacker News"))
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	if t.loading != "" {
 		b.WriteString(t.loading + "\n")
 	}
@@ -662,11 +662,11 @@ func (t Top) listView(width, height int) string {
 	for i := t.listTop; i < end; i++ {
 		item := matches[i]
 		story := item.story
-		line := fmt.Sprintf("%2d. %s", item.index+1, story.Title)
+		line := fmt.Sprintf("%d. %s", item.index+1, story.Title)
 		if domain := storyDomain(story.URL); domain != "" {
 			line += " (" + domain + ")"
 		}
-		meta := fmt.Sprintf("     %d points by %s | %d comments", story.Score, story.By, story.Descendants)
+		meta := fmt.Sprintf("   %d points by %s | %d comments", story.Score, story.By, story.Descendants)
 		if t.savedIDs[story.ID] {
 			meta += " | saved"
 		}

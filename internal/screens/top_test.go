@@ -155,6 +155,46 @@ func TestListViewSeparatesStories(t *testing.T) {
 	}
 }
 
+func TestListViewSpacesTitleFromStories(t *testing.T) {
+	top := NewTop()
+	top.loading = ""
+	top.storyIDs = []int{1}
+	top.stories = []hn.Item{{Title: "First story", URL: "https://example.com/first", Score: 10, By: "alice", Descendants: 3}}
+
+	lines := strings.Split(ansi.Strip(top.listView(80, 12)), "\n")
+	title := lineIndex(lines, "Top Hacker News")
+	story := lineIndex(lines, "First story")
+	if title < 0 || story < 0 {
+		t.Fatalf("expected title and story in %q", strings.Join(lines, "\n"))
+	}
+	if story != title+2 {
+		t.Fatalf("expected one blank line between title and first story; got title=%d story=%d", title, story)
+	}
+	if strings.TrimSpace(lines[title+1]) != "" {
+		t.Fatalf("expected blank line after title, got %q", lines[title+1])
+	}
+}
+
+func TestListViewUsesCompactStoryIndent(t *testing.T) {
+	top := NewTop()
+	top.loading = ""
+	top.storyIDs = []int{1}
+	top.stories = []hn.Item{{Title: "First story", URL: "https://example.com/first", Score: 10, By: "alice", Descendants: 3}}
+
+	lines := strings.Split(ansi.Strip(top.listView(80, 12)), "\n")
+	story := lineIndex(lines, "1. First story")
+	meta := lineIndex(lines, "10 points by alice")
+	if story < 0 || meta < 0 {
+		t.Fatalf("expected story and metadata in %q", strings.Join(lines, "\n"))
+	}
+	if column := strings.Index(lines[story], "1. First story"); column != 2 {
+		t.Fatalf("expected story rank at column 2, got %d in %q", column, lines[story])
+	}
+	if column := strings.Index(lines[meta], "10 points by alice"); column != 3 {
+		t.Fatalf("expected metadata at column 3, got %d in %q", column, lines[meta])
+	}
+}
+
 func TestFilteredStoriesMatchesTitleAuthorAndDomain(t *testing.T) {
 	top := topWithStories()
 
