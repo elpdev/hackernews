@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"sort"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/elpdev/hackernews/internal/commands"
 	"github.com/elpdev/hackernews/internal/debug"
 	"github.com/elpdev/hackernews/internal/screens"
 	"github.com/elpdev/hackernews/internal/theme"
-	tea "charm.land/bubbletea/v2"
 )
 
-const defaultScreen = "home"
+const defaultScreen = "top"
 
 type BuildInfo struct {
 	Version string
@@ -73,6 +73,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) registerScreens() {
+	m.screens["top"] = screens.NewTop()
 	m.screens["home"] = screens.NewHome()
 	m.screens["settings"] = screens.NewSettings(screens.SettingsState{
 		ThemeName:      m.theme.Name,
@@ -92,7 +93,7 @@ func (m *Model) refreshScreenOrder() {
 		m.screenOrder = append(m.screenOrder, id)
 	}
 	sort.Strings(m.screenOrder)
-	preferred := []string{"home", "settings", "help", "logs"}
+	preferred := []string{"top", "home", "settings", "help", "logs"}
 	ordered := make([]string, 0, len(m.screenOrder))
 	seen := make(map[string]bool)
 	for _, id := range preferred {
@@ -110,6 +111,7 @@ func (m *Model) refreshScreenOrder() {
 }
 
 func (m *Model) registerCommands() {
+	m.commands.Register(commands.Command{ID: "go-top", Title: "Go to Top Stories", Description: "Open Hacker News top stories", Keywords: []string{"top", "hacker news", "stories", "news"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"top"} } }})
 	m.commands.Register(commands.Command{ID: "go-home", Title: "Go to Home", Description: "Open the home screen", Keywords: []string{"home", "start"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"home"} } }})
 	m.commands.Register(commands.Command{ID: "go-settings", Title: "Go to Settings", Description: "Open application settings", Keywords: []string{"settings", "config"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"settings"} } }})
 	m.commands.Register(commands.Command{ID: "go-help", Title: "Go to Help", Description: "Open keyboard and command documentation", Keywords: []string{"help", "keys", "docs"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"help"} } }})

@@ -20,11 +20,11 @@ func (h Home) View(width, height int) string {
 	content := strings.Join([]string{
 		"Hackernews",
 		"",
-		"An opinionated Bubble Tea starter kit for building polished Go TUIs.",
+		"A terminal UI for reading Hacker News top stories and extracted article text.",
 		"",
+		"Open Top Stories from the sidebar to browse the current front page.",
 		"Press ctrl+k to open command palette.",
 		"Press ? for help.",
-		"Use the sidebar to navigate between starter screens.",
 	}, "\n")
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }

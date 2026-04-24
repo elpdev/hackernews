@@ -3,10 +3,10 @@ package app
 import (
 	"fmt"
 
-	"github.com/elpdev/hackernews/internal/commands"
-	"github.com/elpdev/hackernews/internal/screens"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/elpdev/hackernews/internal/commands"
+	"github.com/elpdev/hackernews/internal/screens"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -87,7 +87,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = true
 		return m, nil
 	case key.Matches(msg, m.keys.Cancel):
-		return m, nil
+		active := m.screens[m.activeScreen]
+		updated, cmd := active.Update(msg)
+		m.screens[m.activeScreen] = updated
+		return m, cmd
 	case key.Matches(msg, m.keys.Focus):
 		if m.focus == FocusMain && m.showSidebar {
 			m.focus = FocusSidebar
