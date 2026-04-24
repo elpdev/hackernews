@@ -32,10 +32,10 @@ const (
 )
 
 const (
-	paletteModalWidth           = 62
+	paletteModalWidth           = 86
 	paletteTitleWidth           = 18
-	paletteContentWidth         = 48
-	paletteSelectedContentWidth = 46
+	paletteContentWidth         = 80
+	paletteSelectedContentWidth = 78
 )
 
 type SyncSetup struct {
