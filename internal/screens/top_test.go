@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/hn"
+	"github.com/elpdev/hackernews/internal/saved"
 )
 
 func TestRenderedArticleLinesPlacesImageAfterTitle(t *testing.T) {
@@ -565,6 +566,169 @@ func TestArticleOpenKeyWithoutURLGivesStatus(t *testing.T) {
 	if top.status != "No URL to open" {
 		t.Fatalf("expected 'No URL to open', got %q", top.status)
 	}
+}
+
+func TestStoryCopyKeyCopiesSelectedStoryURL(t *testing.T) {
+	top := topWithStories()
+	top.selected = 1
+	var gotURL string
+	top.copier = func(url string) error {
+		gotURL = url
+		return nil
+	}
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "y", Code: 'y'})
+
+	if gotURL != "https://rust-lang.org/news" {
+		t.Fatalf("expected selected story URL copied, got %q", gotURL)
+	}
+	if top.status != "Copied URL to clipboard" {
+		t.Fatalf("expected success status, got %q", top.status)
+	}
+}
+
+func TestStoryCopyKeyCopiesHNFallbackURL(t *testing.T) {
+	top := NewTop()
+	top.loading = ""
+	top.stories = []hn.Item{{ID: 42, Title: "Ask HN", Text: "Question"}}
+	top.pages[0] = top.stories
+	var gotURL string
+	top.copier = func(url string) error {
+		gotURL = url
+		return nil
+	}
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "y", Code: 'y'})
+
+	if gotURL != "https://news.ycombinator.com/item?id=42" {
+		t.Fatalf("expected HN fallback URL copied, got %q", gotURL)
+	}
+}
+
+func TestArticleCopyKeyCopiesReaderURL(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+	var gotURL string
+	top.copier = func(url string) error {
+		gotURL = url
+		return nil
+	}
+	top.articles[7] = articles.Article{URL: "https://example.com/x"}
+	top.readID = 7
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "y", Code: 'y'})
+
+	if gotURL != "https://example.com/x" {
+		t.Fatalf("expected reader URL copied, got %q", gotURL)
+	}
+	if top.status != "Copied URL to clipboard" {
+		t.Fatalf("expected success status, got %q", top.status)
+	}
+}
+
+func TestArticleCopyKeySurfacesCopierError(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+	top.copier = func(string) error { return errors.New("wl-copy not found") }
+	top.articles[8] = articles.Article{URL: "https://example.com/y"}
+	top.readID = 8
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "y", Code: 'y'})
+
+	if !strings.Contains(top.status, "wl-copy not found") {
+		t.Fatalf("expected copier error in status, got %q", top.status)
+	}
+}
+
+func TestParagraphLineNavigation(t *testing.T) {
+	lines := []string{"Title", "", "First paragraph", "wrap", "", "Second paragraph", "wrap", "", "Third paragraph"}
+
+	if got := nextParagraphLine(lines, 0); got != 2 {
+		t.Fatalf("next from title = %d, want 2", got)
+	}
+	if got := nextParagraphLine(lines, 2); got != 5 {
+		t.Fatalf("next from first paragraph = %d, want 5", got)
+	}
+	if got := previousParagraphLine(lines, 8); got != 5 {
+		t.Fatalf("previous from third paragraph = %d, want 5", got)
+	}
+	if got := previousParagraphLine(lines, 5); got != 2 {
+		t.Fatalf("previous from second paragraph = %d, want 2", got)
+	}
+}
+
+func TestArticleParagraphKeysMoveBetweenParagraphs(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	top := NewTop()
+	top.articles[7] = articles.Article{Markdown: "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."}
+	top.readID = 7
+	lines := renderedArticleLines(7, 80, top.articles[7], articleImage{})
+	second := lineIndex(lines, "Second paragraph")
+	third := lineIndex(lines, "Third paragraph")
+	if second < 0 || third < 0 {
+		t.Fatalf("expected paragraph lines in %q", strings.Join(lines, "\n"))
+	}
+
+	top = updateTopWithKey(t, top, tea.Key{Text: "]", Code: ']'})
+	if top.readLine != second {
+		t.Fatalf("expected ] to move to second paragraph line %d, got %d", second, top.readLine)
+	}
+	top = updateTopWithKey(t, top, tea.Key{Text: "]", Code: ']'})
+	if top.readLine != third {
+		t.Fatalf("expected ] to move to third paragraph line %d, got %d", third, top.readLine)
+	}
+	top = updateTopWithKey(t, top, tea.Key{Text: "[", Code: '['})
+	if top.readLine != second {
+		t.Fatalf("expected [ to move back to second paragraph line %d, got %d", second, top.readLine)
+	}
+}
+
+func TestSavedCopyKeyCopiesSelectedArticleURL(t *testing.T) {
+	screen := NewSaved(nil)
+	screen.loading = ""
+	screen.items = []saved.Article{{ID: 1, Article: articles.Article{URL: "https://example.com/saved"}}}
+	var gotURL string
+	screen.copier = func(url string) error {
+		gotURL = url
+		return nil
+	}
+
+	screen = updateSavedWithKey(t, screen, tea.Key{Text: "y", Code: 'y'})
+
+	if gotURL != "https://example.com/saved" {
+		t.Fatalf("expected saved article URL copied, got %q", gotURL)
+	}
+	if screen.status != "Copied URL to clipboard" {
+		t.Fatalf("expected success status, got %q", screen.status)
+	}
+}
+
+func TestSavedArticleParagraphKeysMoveBetweenParagraphs(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	screen := NewSaved(nil)
+	screen.loading = ""
+	screen.items = []saved.Article{{ID: 3, Article: articles.Article{Markdown: "First paragraph.\n\nSecond paragraph."}}}
+	screen.readID = 3
+	lines := renderedArticleLines(3, 80, screen.items[0].Article, articleImage{})
+	second := lineIndex(lines, "Second paragraph")
+	if second < 0 {
+		t.Fatalf("expected second paragraph in %q", strings.Join(lines, "\n"))
+	}
+
+	screen = updateSavedWithKey(t, screen, tea.Key{Text: "]", Code: ']'})
+	if screen.readLine != second {
+		t.Fatalf("expected ] to move to second paragraph line %d, got %d", second, screen.readLine)
+	}
+	screen = updateSavedWithKey(t, screen, tea.Key{Text: "[", Code: '['})
+	if screen.readLine != 0 {
+		t.Fatalf("expected [ to move back to first paragraph, got %d", screen.readLine)
+	}
+}
+
+func updateSavedWithKey(t *testing.T, screen Saved, key tea.Key) Saved {
+	t.Helper()
+	updated, _ := screen.Update(tea.KeyPressMsg(key))
+	return updated.(Saved)
 }
 
 func lineIndex(lines []string, needle string) int {

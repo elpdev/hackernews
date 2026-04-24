@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/browser"
+	"github.com/elpdev/hackernews/internal/clipboard"
 	"github.com/elpdev/hackernews/internal/hn"
 	"github.com/elpdev/hackernews/internal/media"
 	"github.com/elpdev/hackernews/internal/saved"
@@ -40,6 +41,7 @@ type Top struct {
 	client    hn.Client
 	extractor articles.Extractor
 	opener    func(string) error
+	copier    func(string) error
 	saved     saved.Store
 	storyIDs  []int
 	stories   []hn.Item
@@ -138,6 +140,7 @@ func NewTop(stores ...saved.Store) Top {
 		client:    hn.NewClient(nil),
 		extractor: articles.NewTrafilaturaExtractor(),
 		opener:    browser.Open,
+		copier:    clipboard.Copy,
 		saved:     store,
 		pages:     make(map[int][]hn.Item),
 		articles:  make(map[int]articles.Article),
@@ -249,6 +252,7 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("down/j", "down")),
 		key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
+		key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[/]", "paragraph")),
 		key.NewBinding(key.WithKeys("left", "p"), key.WithHelp("left/p", "prev 100")),
 		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next 100")),
 		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
@@ -256,6 +260,7 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort / open in browser")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save/unsave")),
+		key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy url")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
@@ -272,6 +277,9 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			return t, t.toggleSaved(t.readID)
 		case "o":
 			t.status = t.openArticleURL(t.articles[t.readID].URL)
+			return t, nil
+		case "y":
+			t.status = t.copyArticleURL(t.articleURLForID(t.readID))
 			return t, nil
 		case "esc":
 			t.readID = 0
@@ -291,6 +299,10 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			}
 		case "pgdown":
 			t.readLine += 10
+		case "]":
+			t.readLine = nextParagraphLine(cachedArticleLines(t.readID), t.readLine)
+		case "[":
+			t.readLine = previousParagraphLine(cachedArticleLines(t.readID), t.readLine)
 		}
 		t.readLine = clampIndex(t.readLine, cachedArticleLineCount(t.readID))
 		return t, nil
@@ -368,6 +380,8 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return t, t.loadArticle(story)
 	case "s":
 		return t, t.toggleSaved(matches[t.selected].story.ID)
+	case "y":
+		t.status = t.copyArticleURL(t.articleURLForStory(matches[t.selected].story))
 	}
 	return t, nil
 }
@@ -481,15 +495,32 @@ func (t Top) articleForStory(story hn.Item) articles.Article {
 	if article, ok := t.articles[story.ID]; ok {
 		return article
 	}
-	articleURL := strings.TrimSpace(story.URL)
-	if articleURL == "" {
-		articleURL = fmt.Sprintf("https://news.ycombinator.com/item?id=%d", story.ID)
-	}
+	articleURL := t.articleURLForStory(story)
 	article := articles.Article{Title: story.Title, Author: story.By, URL: articleURL}
 	if strings.TrimSpace(story.Text) != "" {
 		article.Markdown = hnTextMarkdown(story)
 	}
 	return article
+}
+
+func (t Top) articleURLForID(id int) string {
+	if article, ok := t.articles[id]; ok && strings.TrimSpace(article.URL) != "" {
+		return article.URL
+	}
+	if story, ok := t.storyByID(id); ok {
+		return t.articleURLForStory(story)
+	}
+	return ""
+}
+
+func (t Top) articleURLForStory(story hn.Item) string {
+	if strings.TrimSpace(story.URL) != "" {
+		return story.URL
+	}
+	if story.ID == 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://news.ycombinator.com/item?id=%d", story.ID)
 }
 
 func (t Top) goToPage(page int) (Screen, tea.Cmd) {
@@ -531,6 +562,19 @@ func (t Top) openArticleURL(url string) string {
 		return "Could not open browser: " + err.Error()
 	}
 	return "Opening in browser..."
+}
+
+func (t Top) copyArticleURL(url string) string {
+	if strings.TrimSpace(url) == "" {
+		return "No URL to copy"
+	}
+	if t.copier == nil {
+		return "Could not copy URL: no clipboard configured"
+	}
+	if err := t.copier(url); err != nil {
+		return "Could not copy URL: " + err.Error()
+	}
+	return "Copied URL to clipboard"
 }
 
 func (t Top) loadArticle(story hn.Item) tea.Cmd {
@@ -717,7 +761,7 @@ func (t Top) listView(width, height int) string {
 	case sortLabel != "":
 		footer = fmt.Sprintf("%d loaded | sort: %s | showing %d-%d of %d | o cycle sort | / search | enter read | s save", loadedCount, sortLabel, t.listTop+1, end, len(matches))
 	default:
-		footer = fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | o sort | n/p next/prev 100 | j/k scroll | enter read | s save | r refresh", t.page+1, t.pageCount(), matches[t.listTop].index+1, matches[end-1].index+1, len(t.storyIDs))
+		footer = fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | o sort | n/p next/prev 100 | j/k scroll | enter read | s save | y copy url | r refresh", t.page+1, t.pageCount(), matches[t.listTop].index+1, matches[end-1].index+1, len(t.storyIDs))
 	}
 	b.WriteString(truncateScreen(footer, width))
 	return b.String()
@@ -799,7 +843,7 @@ func (t Top) articleView(width, height int) string {
 	if t.savedIDs[t.readID] {
 		saveHelp = "s unsave"
 	}
-	header := []string{"esc back | " + saveHelp + " | o open in browser | j/k move highlight | pgup/pgdn jump"}
+	header := []string{"esc back | " + saveHelp + " | o open in browser | y copy url | j/k move | [/ ] paragraph"}
 	if t.err != "" {
 		header = append(header, t.err)
 	}
@@ -913,6 +957,48 @@ func cachedArticleLineCount(id int) int {
 		}
 	}
 	return 0
+}
+
+func cachedArticleLines(id int) []string {
+	prefix := fmt.Sprintf("%d:", id)
+	articleRenderCache.Lock()
+	defer articleRenderCache.Unlock()
+	for key, lines := range articleRenderCache.lines {
+		if strings.HasPrefix(key, prefix) {
+			return append([]string(nil), lines...)
+		}
+	}
+	return nil
+}
+
+func nextParagraphLine(lines []string, cursor int) int {
+	if len(lines) == 0 {
+		return cursor
+	}
+	cursor = clampIndex(cursor, len(lines))
+	for i := cursor + 1; i < len(lines); i++ {
+		if isBlankRenderedLine(lines[i-1]) && !isBlankRenderedLine(lines[i]) {
+			return i
+		}
+	}
+	return len(lines) - 1
+}
+
+func previousParagraphLine(lines []string, cursor int) int {
+	if len(lines) == 0 {
+		return cursor
+	}
+	cursor = clampIndex(cursor, len(lines))
+	for i := cursor - 1; i > 0; i-- {
+		if isBlankRenderedLine(lines[i-1]) && !isBlankRenderedLine(lines[i]) {
+			return i
+		}
+	}
+	return 0
+}
+
+func isBlankRenderedLine(line string) bool {
+	return strings.TrimSpace(ansi.Strip(line)) == ""
 }
 
 func renderMarkdown(markdown string, width int) string {

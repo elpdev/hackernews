@@ -57,7 +57,7 @@ func New(meta BuildInfo) Model {
 	m := Model{
 		activeScreen: defaultScreen,
 		screens:      make(map[string]screens.Screen),
-		showSidebar:  true,
+		showSidebar:  false,
 		focus:        FocusMain,
 		keys:         DefaultKeyMap(),
 		commands:     commands.NewRegistry(),

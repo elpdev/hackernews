@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/browser"
+	"github.com/elpdev/hackernews/internal/clipboard"
 	"github.com/elpdev/hackernews/internal/media"
 	"github.com/elpdev/hackernews/internal/saved"
 )
@@ -18,6 +19,7 @@ import (
 type Saved struct {
 	store    saved.Store
 	opener   func(string) error
+	copier   func(string) error
 	items    []saved.Article
 	selected int
 	listTop  int
@@ -39,7 +41,7 @@ type savedArticleDeletedMsg struct {
 }
 
 func NewSaved(store saved.Store) Saved {
-	return Saved{store: store, opener: browser.Open, loading: "Loading saved articles..."}
+	return Saved{store: store, opener: browser.Open, copier: clipboard.Copy, loading: "Loading saved articles..."}
 }
 
 func (s Saved) Init() tea.Cmd { return s.load() }
@@ -94,9 +96,11 @@ func (s Saved) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("down/j", "down")),
 		key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
+		key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[/]", "paragraph")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("s", "d"), key.WithHelp("s/d", "delete")),
 		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy url")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
@@ -113,9 +117,16 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			return s, s.delete(s.readID)
 		case "o":
 			if item, ok := s.itemByID(s.readID); ok {
-				s.status = s.openArticleURL(item.Article.URL)
+				s.status = s.openArticleURL(savedArticleURL(item))
 			} else {
 				s.status = "No URL to open"
+			}
+			return s, nil
+		case "y":
+			if item, ok := s.itemByID(s.readID); ok {
+				s.status = s.copyArticleURL(savedArticleURL(item))
+			} else {
+				s.status = "No URL to copy"
 			}
 			return s, nil
 		case "up", "k":
@@ -131,6 +142,10 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			}
 		case "pgdown":
 			s.readLine += 10
+		case "]":
+			s.readLine = nextParagraphLine(cachedArticleLines(s.readID), s.readLine)
+		case "[":
+			s.readLine = previousParagraphLine(cachedArticleLines(s.readID), s.readLine)
 		}
 		s.readLine = clampIndex(s.readLine, cachedArticleLineCount(s.readID))
 		return s, nil
@@ -171,6 +186,8 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.readLine = 0
 	case "s", "d":
 		return s, s.delete(s.items[s.selected].ID)
+	case "y":
+		s.status = s.copyArticleURL(savedArticleURL(s.items[s.selected]))
 	}
 	return s, nil
 }
@@ -252,7 +269,7 @@ func (s Saved) listView(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString(truncateScreen("j/k scroll | enter read | s/d delete | r refresh", width))
+	b.WriteString(truncateScreen("j/k scroll | enter read | s/d delete | y copy url | r refresh", width))
 	return b.String()
 }
 
@@ -261,7 +278,7 @@ func (s Saved) articleView(width, height int) string {
 	if !ok {
 		return "Saved article not found. Press esc to go back."
 	}
-	header := []string{"esc back | s/d delete | o open in browser | j/k move highlight | pgup/pgdn jump"}
+	header := []string{"esc back | s/d delete | o open in browser | y copy url | j/k move | [/ ] paragraph"}
 	if s.status != "" {
 		header = append(header, s.status)
 	}
@@ -307,6 +324,19 @@ func (s Saved) openArticleURL(url string) string {
 	return "Opening in browser..."
 }
 
+func (s Saved) copyArticleURL(url string) string {
+	if strings.TrimSpace(url) == "" {
+		return "No URL to copy"
+	}
+	if s.copier == nil {
+		return "Could not copy URL: no clipboard configured"
+	}
+	if err := s.copier(url); err != nil {
+		return "Could not copy URL: " + err.Error()
+	}
+	return "Copied URL to clipboard"
+}
+
 func (s Saved) itemByID(id int) (saved.Article, bool) {
 	for _, item := range s.items {
 		if item.ID == id {
@@ -324,6 +354,19 @@ func savedTitle(item saved.Article) string {
 		return item.Story.Title
 	}
 	return fmt.Sprintf("HN item %d", item.ID)
+}
+
+func savedArticleURL(item saved.Article) string {
+	if strings.TrimSpace(item.Article.URL) != "" {
+		return item.Article.URL
+	}
+	if strings.TrimSpace(item.Story.URL) != "" {
+		return item.Story.URL
+	}
+	if item.ID == 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://news.ycombinator.com/item?id=%d", item.ID)
 }
 
 func savedMax(a, b int) int {
