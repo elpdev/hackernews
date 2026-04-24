@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/articles"
@@ -1279,36 +1280,54 @@ func repairLooseListItems(markdown string) string {
 func labelUnlabeledCodeFences(markdown string) string {
 	lines := strings.Split(markdown, "\n")
 	out := make([]string, 0, len(lines))
-	inFence := false
-	fenceStart := -1
-	fenceMarker := ""
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
-		if !inFence {
+		if !isUnlabeledCodeFence(trimmed) {
 			out = append(out, line)
-			if isUnlabeledCodeFence(trimmed) {
-				inFence = true
-				fenceStart = len(out) - 1
-				fenceMarker = trimmed[:3]
-			}
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, fenceMarker) {
-			if lang := inferCodeBlockLanguage(out[fenceStart+1:]); lang != "" {
-				out[fenceStart] = fenceMarker + lang
-			}
-			inFence = false
-			fenceStart = -1
-			fenceMarker = ""
+		fenceMarker := trimmed[:3]
+		end := codeFenceEnd(lines, i+1, fenceMarker)
+		if end == -1 {
+			out = append(out, line)
+			continue
 		}
-		out = append(out, line)
+		out = append(out, normalizeUnlabeledCodeFence(fenceMarker, lines[i+1:end])...)
+		i = end
 	}
 	return strings.Join(out, "\n")
 }
 
 func isUnlabeledCodeFence(line string) bool {
 	return line == "```" || line == "~~~"
+}
+
+func codeFenceEnd(lines []string, start int, marker string) int {
+	for i := start; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
+			return i
+		}
+	}
+	return -1
+}
+
+func normalizeUnlabeledCodeFence(marker string, lines []string) []string {
+	if blocks := splitShellHeredocFence(marker, lines); len(blocks) > 0 {
+		return blocks
+	}
+	if lang := inferCodeBlockLanguage(lines); lang != "" {
+		return fencedCodeBlock(marker, lang, lines)
+	}
+	return fencedCodeBlock(marker, "", lines)
+}
+
+func fencedCodeBlock(marker, lang string, lines []string) []string {
+	out := make([]string, 0, len(lines)+2)
+	out = append(out, marker+lang)
+	out = append(out, indentLooseCode(lang, lines)...)
+	return append(out, marker)
 }
 
 func isMarkdownListItem(line string) bool {
@@ -1401,13 +1420,59 @@ func compactLooseCodeLines(lines []string) []string {
 
 func indentLooseCode(lang string, lines []string) []string {
 	switch lang {
-	case "python", "javascript":
-		return indentBracketedLooseCode(lines)
+	case "python", "javascript", "ruby", "go", "rust", "java", "cpp", "csharp", "php", "swift", "kotlin", "scala":
+		return indentLooseBlockCode(lines)
 	case "bash":
 		return indentLooseBashCode(lines)
 	default:
 		return lines
 	}
+}
+
+func indentLooseBlockCode(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	indent := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			out = append(out, "")
+			continue
+		}
+		if startsBlockDedent(trimmed) {
+			indent = maxScreen(0, indent-1)
+		}
+		out = append(out, strings.Repeat("  ", indent)+trimmed)
+		indent = maxScreen(0, indent+blockIndentDelta(trimmed))
+		if startsBlockContinuation(trimmed) {
+			indent++
+		}
+	}
+	return out
+}
+
+func startsBlockDedent(line string) bool {
+	return startsWithClosingDelimiter(line) || line == "end" || line == "else" || strings.HasPrefix(line, "elsif ") || strings.HasPrefix(line, "elif ") || strings.HasPrefix(line, "when ") || strings.HasPrefix(line, "catch ") || strings.HasPrefix(line, "rescue") || line == "ensure" || strings.HasPrefix(line, "finally") || (strings.HasPrefix(line, "case ") && strings.HasSuffix(line, ":"))
+}
+
+func startsBlockContinuation(line string) bool {
+	if line == "else" || strings.HasPrefix(line, "elsif ") || strings.HasPrefix(line, "elif ") || strings.HasPrefix(line, "when ") || strings.HasPrefix(line, "case ") || strings.HasPrefix(line, "catch ") || strings.HasPrefix(line, "rescue") || line == "ensure" || strings.HasPrefix(line, "finally") {
+		return true
+	}
+	return strings.HasPrefix(line, "def ") || strings.HasPrefix(line, "class ") || strings.HasPrefix(line, "module ") ||
+		strings.HasPrefix(line, "if ") || strings.HasPrefix(line, "unless ") || strings.HasPrefix(line, "case ") ||
+		strings.HasPrefix(line, "while ") || strings.HasPrefix(line, "until ") || strings.HasPrefix(line, "for ") ||
+		strings.HasPrefix(line, "begin") || strings.HasSuffix(line, " do") || strings.HasSuffix(line, ":")
+}
+
+func blockIndentDelta(line string) int {
+	delta := looseIndentDelta(line)
+	if delta > 0 {
+		return 1
+	}
+	if delta < 0 {
+		return -1
+	}
+	return 0
 }
 
 func indentLooseBashCode(lines []string) []string {
@@ -1494,6 +1559,11 @@ func looseCodeLanguages(lines []string) []string {
 func normalizeCodeLanguage(line string) string {
 	lang := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-")))
 	lang = strings.Trim(lang, "`:")
+	return normalizeLanguageName(lang)
+}
+
+func normalizeLanguageName(lang string) string {
+	lang = strings.ToLower(strings.TrimSpace(lang))
 	switch lang {
 	case "curl", "shell", "bash", "sh", "zsh", "fish", "terminal", "console":
 		return "bash"
@@ -1520,11 +1590,95 @@ func normalizeCodeLanguage(line string) string {
 	case "php", "swift", "scala", "sql", "html", "css", "json", "xml", "toml", "dockerfile":
 		return lang
 	default:
+		if lexer := lexers.Get(lang); lexer != nil {
+			aliases := lexer.Config().Aliases
+			if len(aliases) > 0 {
+				return aliases[0]
+			}
+			return strings.ToLower(lexer.Config().Name)
+		}
 		return ""
 	}
 }
 
+func splitShellHeredocFence(marker string, lines []string) []string {
+	for i, line := range lines {
+		delimiter, lang := heredocDelimiter(line)
+		if delimiter == "" || lang == "" {
+			continue
+		}
+		end := heredocEnd(lines, i+1, delimiter)
+		if end == -1 {
+			continue
+		}
+
+		out := make([]string, 0, len(lines)+6)
+		if i > 0 {
+			out = append(out, fencedCodeBlock(marker, "bash", lines[:i+1])...)
+		} else {
+			out = append(out, fencedCodeBlock(marker, "bash", lines[:1])...)
+		}
+		out = append(out, "")
+		out = append(out, fencedCodeBlock(marker, lang, lines[i+1:end])...)
+		if end < len(lines)-1 {
+			out = append(out, "")
+			out = append(out, fencedCodeBlock(marker, "bash", lines[end:])...)
+		}
+		return out
+	}
+	return nil
+}
+
+func heredocDelimiter(line string) (string, string) {
+	idx := strings.Index(line, "<<")
+	if idx == -1 {
+		return "", ""
+	}
+	delimiter := strings.TrimSpace(line[idx+2:])
+	delimiter = strings.TrimPrefix(delimiter, "-")
+	delimiter = strings.TrimPrefix(delimiter, "~")
+	delimiter = strings.Trim(delimiter, "'\"")
+	if delimiter == "" {
+		return "", ""
+	}
+	lang := normalizeLanguageName(delimiter)
+	if lang == "" || lang == "text" {
+		return delimiter, ""
+	}
+	return delimiter, lang
+}
+
+func heredocEnd(lines []string, start int, delimiter string) int {
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == delimiter {
+			return i
+		}
+	}
+	return -1
+}
+
 func inferCodeBlockLanguage(lines []string) string {
+	text := strings.TrimSpace(strings.Join(lines, "\n"))
+	if text == "" {
+		return ""
+	}
+	if lang := inferCodeBlockLanguageFromSignals(lines, false); lang != "" {
+		return lang
+	}
+	if lexer := lexers.Analyse(text); lexer != nil {
+		if lang := normalizeLanguageName(lexer.Config().Name); lang != "" && lang != "text" {
+			return lang
+		}
+		for _, alias := range lexer.Config().Aliases {
+			if lang := normalizeLanguageName(alias); lang != "" && lang != "text" {
+				return lang
+			}
+		}
+	}
+	return inferCodeBlockLanguageFromSignals(lines, true)
+}
+
+func inferCodeBlockLanguageFromSignals(lines []string, includeShell bool) string {
 	var bashScore, rubyScore, goScore, rustScore, cScore int
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -1545,9 +1699,9 @@ func inferCodeBlockLanguage(lines []string) string {
 			rustScore += 3
 		case strings.HasPrefix(trimmed, "#include"), strings.HasPrefix(trimmed, "int main"), strings.HasPrefix(trimmed, "static "):
 			cScore += 3
-		case strings.HasPrefix(lower, "make"), strings.HasPrefix(trimmed, "./"), strings.HasPrefix(lower, "sudo "), strings.HasPrefix(lower, "cat >"), strings.HasPrefix(trimmed, "$"):
+		case includeShell && (strings.HasPrefix(lower, "make") || strings.HasPrefix(trimmed, "./") || strings.HasPrefix(lower, "sudo ") || strings.HasPrefix(lower, "cat >") || strings.HasPrefix(trimmed, "$")):
 			bashScore += 2
-		case strings.HasPrefix(trimmed, "#"):
+		case includeShell && strings.HasPrefix(trimmed, "#"):
 			bashScore++
 		}
 	}
