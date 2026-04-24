@@ -46,10 +46,13 @@ type commentLine struct {
 }
 
 type commentsTreeLoadedMsg struct {
-	storyID int
-	tree    map[int]hn.Item
-	err     error
+	screenID string
+	storyID  int
+	tree     map[int]hn.Item
+	err      error
 }
+
+func (m commentsTreeLoadedMsg) TargetScreenID() string { return m.screenID }
 
 func NewComments(client hn.Client) Comments {
 	return Comments{
@@ -276,7 +279,7 @@ func (c Comments) loadTree() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		tree, err := client.CommentTree(ctx, storyID, commentMaxDepth, commentMaxCount)
-		return commentsTreeLoadedMsg{storyID: storyID, tree: tree, err: err}
+		return commentsTreeLoadedMsg{screenID: "comments", storyID: storyID, tree: tree, err: err}
 	}
 }
 

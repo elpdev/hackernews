@@ -31,14 +31,20 @@ type Saved struct {
 }
 
 type savedArticlesLoadedMsg struct {
-	items []saved.Article
-	err   error
+	screenID string
+	items    []saved.Article
+	err      error
 }
 
+func (m savedArticlesLoadedMsg) TargetScreenID() string { return m.screenID }
+
 type savedArticleDeletedMsg struct {
-	id  int
-	err error
+	screenID string
+	id       int
+	err      error
 }
+
+func (m savedArticleDeletedMsg) TargetScreenID() string { return m.screenID }
 
 func NewSaved(store saved.Store) Saved {
 	return Saved{store: store, opener: browser.Open, copier: clipboard.Copy, loading: "Loading saved articles..."}
@@ -98,6 +104,7 @@ func (s Saved) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
 		key.NewBinding(key.WithKeys("[", "]"), key.WithHelp("[/]", "paragraph")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
+		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comments")),
 		key.NewBinding(key.WithKeys("s", "d"), key.WithHelp("s/d", "delete")),
 		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
 		key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy url")),
@@ -127,6 +134,13 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 				s.status = s.copyArticleURL(savedArticleURL(item))
 			} else {
 				s.status = "No URL to copy"
+			}
+			return s, nil
+		case "c":
+			if item, ok := s.itemByID(s.readID); ok {
+				return s, func() tea.Msg {
+					return OpenCommentsMsg{Story: item.Story, ReturnTo: "saved"}
+				}
 			}
 			return s, nil
 		case "up", "k":
@@ -188,32 +202,39 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, s.delete(s.items[s.selected].ID)
 	case "y":
 		s.status = s.copyArticleURL(savedArticleURL(s.items[s.selected]))
+	case "c":
+		item := s.items[s.selected]
+		return s, func() tea.Msg {
+			return OpenCommentsMsg{Story: item.Story, ReturnTo: "saved"}
+		}
 	}
 	return s, nil
 }
 
 func (s Saved) load() tea.Cmd {
 	if s.store == nil {
-		return func() tea.Msg { return savedArticlesLoadedMsg{err: fmt.Errorf("saved article store is unavailable")} }
+		return func() tea.Msg {
+			return savedArticlesLoadedMsg{screenID: "saved", err: fmt.Errorf("saved article store is unavailable")}
+		}
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		items, err := s.store.List(ctx)
-		return savedArticlesLoadedMsg{items: items, err: err}
+		return savedArticlesLoadedMsg{screenID: "saved", items: items, err: err}
 	}
 }
 
 func (s Saved) delete(id int) tea.Cmd {
 	if s.store == nil {
 		return func() tea.Msg {
-			return savedArticleDeletedMsg{id: id, err: fmt.Errorf("saved article store is unavailable")}
+			return savedArticleDeletedMsg{screenID: "saved", id: id, err: fmt.Errorf("saved article store is unavailable")}
 		}
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return savedArticleDeletedMsg{id: id, err: s.store.Delete(ctx, id)}
+		return savedArticleDeletedMsg{screenID: "saved", id: id, err: s.store.Delete(ctx, id)}
 	}
 }
 

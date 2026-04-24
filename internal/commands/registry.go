@@ -27,7 +27,18 @@ func (r *Registry) List() []Command {
 	for _, command := range r.commands {
 		commands = append(commands, command)
 	}
-	sort.Slice(commands, func(i, j int) bool { return commands[i].Title < commands[j].Title })
+	sort.Slice(commands, func(i, j int) bool {
+		if commands[i].Order != commands[j].Order {
+			if commands[i].Order == 0 {
+				return false
+			}
+			if commands[j].Order == 0 {
+				return true
+			}
+			return commands[i].Order < commands[j].Order
+		}
+		return commands[i].Title < commands[j].Title
+	})
 	return commands
 }
 

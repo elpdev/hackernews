@@ -123,16 +123,16 @@ func (m *Model) refreshScreenOrder() {
 }
 
 func (m *Model) registerCommands() {
-	m.commands.Register(commands.Command{ID: "go-top", Title: "Go to Top Stories", Description: "Open Hacker News top stories", Keywords: []string{"top", "hacker news", "stories", "news"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"top"} } }})
-	m.commands.Register(commands.Command{ID: "go-new", Title: "Go to New", Description: "Open newest Hacker News stories", Keywords: []string{"new", "newest", "recent"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"new"} } }})
-	m.commands.Register(commands.Command{ID: "go-best", Title: "Go to Best", Description: "Open best Hacker News stories", Keywords: []string{"best", "popular"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"best"} } }})
-	m.commands.Register(commands.Command{ID: "go-ask", Title: "Go to Ask HN", Description: "Open Ask HN stories", Keywords: []string{"ask", "ask hn", "questions"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"ask"} } }})
-	m.commands.Register(commands.Command{ID: "go-show", Title: "Go to Show HN", Description: "Open Show HN stories", Keywords: []string{"show", "show hn", "projects"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"show"} } }})
-	m.commands.Register(commands.Command{ID: "go-jobs", Title: "Go to Jobs", Description: "Open HN job postings", Keywords: []string{"jobs", "hiring", "careers"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"jobs"} } }})
-	m.commands.Register(commands.Command{ID: "go-saved", Title: "Go to Saved", Description: "Open saved articles", Keywords: []string{"saved", "articles", "bookmarks", "offline"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"saved"} } }})
-	m.commands.Register(commands.Command{ID: "toggle-sidebar", Title: "Toggle Sidebar", Description: "Show or hide sidebar navigation", Keywords: []string{"sidebar", "layout"}, Run: func() tea.Cmd { return func() tea.Msg { return toggleSidebarMsg{} } }})
-	m.commands.Register(commands.Command{ID: "themes", Title: "Themes", Description: "Preview and select a theme", Keywords: []string{"theme", "themes", "appearance", "colors", "dark", "muted", "phosphor", "miami"}})
-	m.commands.Register(commands.Command{ID: "quit", Title: "Quit", Description: "Exit Hackernews", Keywords: []string{"exit", "close"}, Run: func() tea.Cmd { return func() tea.Msg { return quitMsg{} } }})
+	m.commands.Register(commands.Command{ID: "go-top", Title: "Top Stories", Description: "Open Hacker News top stories", Keywords: []string{"top", "hacker news", "stories", "news"}, Order: 10, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"top"} } }})
+	m.commands.Register(commands.Command{ID: "go-new", Title: "New", Description: "Open newest Hacker News stories", Keywords: []string{"new", "newest", "recent"}, Order: 20, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"new"} } }})
+	m.commands.Register(commands.Command{ID: "go-best", Title: "Best", Description: "Open best Hacker News stories", Keywords: []string{"best", "popular"}, Order: 30, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"best"} } }})
+	m.commands.Register(commands.Command{ID: "go-ask", Title: "Ask HN", Description: "Open Ask HN stories", Keywords: []string{"ask", "ask hn", "questions"}, Order: 40, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"ask"} } }})
+	m.commands.Register(commands.Command{ID: "go-show", Title: "Show HN", Description: "Open Show HN stories", Keywords: []string{"show", "show hn", "projects"}, Order: 50, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"show"} } }})
+	m.commands.Register(commands.Command{ID: "go-jobs", Title: "Jobs", Description: "Open HN job postings", Keywords: []string{"jobs", "hiring", "careers"}, Order: 60, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"jobs"} } }})
+	m.commands.Register(commands.Command{ID: "go-saved", Title: "Saved", Description: "Open saved articles", Keywords: []string{"saved", "articles", "bookmarks", "offline"}, Order: 70, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"saved"} } }})
+	m.commands.Register(commands.Command{ID: "toggle-sidebar", Title: "Toggle Sidebar", Description: "Show or hide sidebar navigation", Keywords: []string{"sidebar", "layout"}, Order: 80, Run: func() tea.Cmd { return func() tea.Msg { return toggleSidebarMsg{} } }})
+	m.commands.Register(commands.Command{ID: "themes", Title: "Themes", Description: "Preview and select a theme", Keywords: []string{"theme", "themes", "appearance", "colors", "dark", "muted", "phosphor", "miami"}, Order: 90})
+	m.commands.Register(commands.Command{ID: "quit", Title: "Quit", Description: "Exit Hackernews", Keywords: []string{"exit", "close"}, Order: 100, Run: func() tea.Cmd { return func() tea.Msg { return quitMsg{} } }})
 }
 
 func (m *Model) switchScreen(id string) {

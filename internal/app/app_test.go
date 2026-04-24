@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/elpdev/hackernews/internal/screens"
 )
 
 func TestSwitchScreenForTest(t *testing.T) {
@@ -99,6 +101,58 @@ func TestSidebarNavigationInitializesSavedScreen(t *testing.T) {
 	}
 }
 
+func TestCommandPaletteDoesNotSwallowScreenMessages(t *testing.T) {
+	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
+	model.screens[model.activeScreen] = recordingScreen{}
+	model.showCommandPalette = true
+
+	updated, _ := model.Update(testScreenMsg{})
+	model = updated.(Model)
+
+	screen := model.screens[model.activeScreen].(recordingScreen)
+	if screen.updates != 1 {
+		t.Fatalf("expected active screen to receive message while palette is open, got %d updates", screen.updates)
+	}
+}
+
+func TestTargetedMessageUpdatesOwningScreenWhenInactive(t *testing.T) {
+	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
+	model.screens["top"] = recordingScreen{}
+	model.screens["new"] = recordingScreen{}
+	model.activeScreen = "new"
+
+	updated, _ := model.Update(targetedTestScreenMsg{screenID: "top"})
+	model = updated.(Model)
+
+	top := model.screens["top"].(recordingScreen)
+	if top.updates != 1 {
+		t.Fatalf("expected top screen to receive targeted message, got %d updates", top.updates)
+	}
+	newScreen := model.screens["new"].(recordingScreen)
+	if newScreen.updates != 0 {
+		t.Fatalf("expected active new screen to be untouched, got %d updates", newScreen.updates)
+	}
+}
+
+func TestTargetedMessageUpdatesOwningScreenWithPaletteOpen(t *testing.T) {
+	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
+	model.screens["top"] = recordingScreen{}
+	model.screens["new"] = recordingScreen{}
+	model.activeScreen = "new"
+	model.showCommandPalette = true
+
+	updated, _ := model.Update(targetedTestScreenMsg{screenID: "top"})
+	model = updated.(Model)
+
+	top := model.screens["top"].(recordingScreen)
+	if top.updates != 1 {
+		t.Fatalf("expected top screen to receive targeted message behind palette, got %d updates", top.updates)
+	}
+	if !model.showCommandPalette {
+		t.Fatal("expected command palette to remain open")
+	}
+}
+
 func openThemePalette(t *testing.T, model Model) Model {
 	t.Helper()
 	model = sendKey(t, model, tea.Key{Code: 'k', Mod: tea.ModCtrl})
@@ -127,3 +181,28 @@ func sendKey(t *testing.T, model Model, key tea.Key) Model {
 func keyPress(key tea.Key) tea.KeyPressMsg {
 	return tea.KeyPressMsg(key)
 }
+
+type testScreenMsg struct{}
+
+type targetedTestScreenMsg struct {
+	screenID string
+}
+
+func (m targetedTestScreenMsg) TargetScreenID() string { return m.screenID }
+
+type recordingScreen struct {
+	updates int
+}
+
+func (s recordingScreen) Init() tea.Cmd { return nil }
+
+func (s recordingScreen) Update(tea.Msg) (screens.Screen, tea.Cmd) {
+	s.updates++
+	return s, nil
+}
+
+func (s recordingScreen) View(int, int) string { return "" }
+
+func (s recordingScreen) Title() string { return "Recording" }
+
+func (s recordingScreen) KeyBindings() []key.Binding { return nil }

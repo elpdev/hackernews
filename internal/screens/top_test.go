@@ -41,6 +41,25 @@ func TestRenderedArticleLinesPlacesImageAfterTitle(t *testing.T) {
 	}
 }
 
+func TestRepairLooseListItemsJoinsSplitParagraphs(t *testing.T) {
+	markdown := "- The model names `deepseek-chat`\n\nand `deepseek-reasoner`\n\nwill be deprecated.\n\n## Invoke The Chat API\n"
+
+	got := repairLooseListItems(markdown)
+	want := "- The model names `deepseek-chat` and `deepseek-reasoner` will be deprecated.\n\n## Invoke The Chat API\n"
+	if got != want {
+		t.Fatalf("unexpected repaired markdown:\n%s", got)
+	}
+}
+
+func TestRepairLooseListItemsStopsAtNextListItem(t *testing.T) {
+	markdown := "- First item\n\n- Second item\n"
+
+	got := repairLooseListItems(markdown)
+	if got != markdown {
+		t.Fatalf("expected separate list items to remain unchanged, got:\n%s", got)
+	}
+}
+
 func TestRenderedArticleLinesOmitsImageWithoutArticleImage(t *testing.T) {
 	articleRenderCache.lines = make(map[string][]string)
 	article := articles.Article{

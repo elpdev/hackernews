@@ -91,33 +91,48 @@ type storyListItem struct {
 }
 
 type topStoriesLoadedMsg struct {
-	ids     []int
-	stories []hn.Item
-	err     error
+	screenID string
+	ids      []int
+	stories  []hn.Item
+	err      error
 }
+
+func (m topStoriesLoadedMsg) TargetScreenID() string { return m.screenID }
 
 type storyPageLoadedMsg struct {
-	page    int
-	stories []hn.Item
-	err     error
+	screenID string
+	page     int
+	stories  []hn.Item
+	err      error
 }
+
+func (m storyPageLoadedMsg) TargetScreenID() string { return m.screenID }
 
 type articleLoadedMsg struct {
-	id      int
-	article articles.Article
-	err     error
+	screenID string
+	id       int
+	article  articles.Article
+	err      error
 }
+
+func (m articleLoadedMsg) TargetScreenID() string { return m.screenID }
 
 type savedIDsLoadedMsg struct {
-	ids map[int]bool
-	err error
+	screenID string
+	ids      map[int]bool
+	err      error
 }
 
+func (m savedIDsLoadedMsg) TargetScreenID() string { return m.screenID }
+
 type articleSavedToggledMsg struct {
-	id    int
-	saved bool
-	err   error
+	screenID string
+	id       int
+	saved    bool
+	err      error
 }
+
+func (m articleSavedToggledMsg) TargetScreenID() string { return m.screenID }
 
 type articleImage struct {
 	url   string
@@ -126,11 +141,14 @@ type articleImage struct {
 }
 
 type articleImageLoadedMsg struct {
-	id    int
-	url   string
-	bytes []byte
-	err   error
+	screenID string
+	id       int
+	url      string
+	bytes    []byte
+	err      error
 }
+
+func (m articleImageLoadedMsg) TargetScreenID() string { return m.screenID }
 
 func NewTop(stores ...saved.Store) Top {
 	var store saved.Store
@@ -296,6 +314,13 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		case "y":
 			t.status = t.copyArticleURL(t.articleURLForID(t.readID))
 			return t, nil
+		case "c":
+			if story, ok := t.storyByID(t.readID); ok {
+				return t, func() tea.Msg {
+					return OpenCommentsMsg{Story: story, ReturnTo: t.screenID()}
+				}
+			}
+			return t, nil
 		case "esc":
 			t.readID = 0
 			t.readTop = 0
@@ -442,19 +467,20 @@ func (t Top) loadStories() tea.Cmd {
 	if feed == "" {
 		feed = hn.FeedTop
 	}
+	screenID := t.screenID()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		ids, err := t.client.StoryIDs(ctx, feed)
 		if err != nil {
-			return topStoriesLoadedMsg{err: err}
+			return topStoriesLoadedMsg{screenID: screenID, err: err}
 		}
 		if len(ids) > topStoryLimit {
 			ids = ids[:topStoryLimit]
 		}
 		end := minScreen(len(ids), topStoriesPerPage)
 		stories, err := t.client.Stories(ctx, ids[:end])
-		return topStoriesLoadedMsg{ids: ids, stories: stories, err: err}
+		return topStoriesLoadedMsg{screenID: screenID, ids: ids, stories: stories, err: err}
 	}
 }
 
@@ -483,27 +509,29 @@ func (t Top) loadSavedIDs() tea.Cmd {
 	if t.saved == nil {
 		return nil
 	}
+	screenID := t.screenID()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		items, err := t.saved.List(ctx)
 		if err != nil {
-			return savedIDsLoadedMsg{err: err}
+			return savedIDsLoadedMsg{screenID: screenID, err: err}
 		}
 		ids := make(map[int]bool, len(items))
 		for _, item := range items {
 			ids[item.ID] = true
 		}
-		return savedIDsLoadedMsg{ids: ids}
+		return savedIDsLoadedMsg{screenID: screenID, ids: ids}
 	}
 }
 
 func (t Top) toggleSaved(id int) tea.Cmd {
 	if t.saved == nil {
 		return func() tea.Msg {
-			return articleSavedToggledMsg{id: id, err: fmt.Errorf("saved article store is unavailable")}
+			return articleSavedToggledMsg{screenID: t.screenID(), id: id, err: fmt.Errorf("saved article store is unavailable")}
 		}
 	}
+	screenID := t.screenID()
 	story, ok := t.storyByID(id)
 	if !ok {
 		story = hn.Item{ID: id, Type: "story"}
@@ -514,9 +542,9 @@ func (t Top) toggleSaved(id int) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if alreadySaved {
-			return articleSavedToggledMsg{id: id, saved: false, err: t.saved.Delete(ctx, id)}
+			return articleSavedToggledMsg{screenID: screenID, id: id, saved: false, err: t.saved.Delete(ctx, id)}
 		}
-		return articleSavedToggledMsg{id: id, saved: true, err: t.saved.Save(ctx, story, article)}
+		return articleSavedToggledMsg{screenID: screenID, id: id, saved: true, err: t.saved.Save(ctx, story, article)}
 	}
 }
 
@@ -583,16 +611,17 @@ func (t Top) goToPage(page int) (Screen, tea.Cmd) {
 
 func (t Top) loadStoryPage(page int) tea.Cmd {
 	ids := append([]int(nil), t.storyIDs...)
+	screenID := t.screenID()
 	return func() tea.Msg {
 		start := page * topStoriesPerPage
 		if start >= len(ids) {
-			return storyPageLoadedMsg{page: page, stories: nil}
+			return storyPageLoadedMsg{screenID: screenID, page: page, stories: nil}
 		}
 		end := minScreen(len(ids), start+topStoriesPerPage)
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		stories, err := t.client.Stories(ctx, ids[start:end])
-		return storyPageLoadedMsg{page: page, stories: stories, err: err}
+		return storyPageLoadedMsg{screenID: screenID, page: page, stories: stories, err: err}
 	}
 }
 
@@ -623,9 +652,10 @@ func (t Top) copyArticleURL(url string) string {
 }
 
 func (t Top) loadArticle(story hn.Item) tea.Cmd {
+	screenID := t.screenID()
 	return func() tea.Msg {
 		if strings.TrimSpace(story.URL) == "" {
-			return articleLoadedMsg{id: story.ID, article: articles.Article{
+			return articleLoadedMsg{screenID: screenID, id: story.ID, article: articles.Article{
 				Title:    story.Title,
 				Author:   story.By,
 				URL:      fmt.Sprintf("https://news.ycombinator.com/item?id=%d", story.ID),
@@ -642,7 +672,7 @@ func (t Top) loadArticle(story hn.Item) tea.Cmd {
 		if strings.TrimSpace(article.URL) == "" {
 			article.URL = story.URL
 		}
-		return articleLoadedMsg{id: story.ID, article: article, err: err}
+		return articleLoadedMsg{screenID: screenID, id: story.ID, article: article, err: err}
 	}
 }
 
@@ -687,29 +717,30 @@ func resolveArticleImageURL(article articles.Article) string {
 }
 
 func (t Top) loadArticleImage(id int, rawURL string) tea.Cmd {
+	screenID := t.screenID()
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
-			return articleImageLoadedMsg{id: id, url: rawURL, err: err}
+			return articleImageLoadedMsg{screenID: screenID, id: id, url: rawURL, err: err}
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return articleImageLoadedMsg{id: id, url: rawURL, err: err}
+			return articleImageLoadedMsg{screenID: screenID, id: id, url: rawURL, err: err}
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return articleImageLoadedMsg{id: id, url: rawURL, err: fmt.Errorf("image returned %s", resp.Status)}
+			return articleImageLoadedMsg{screenID: screenID, id: id, url: rawURL, err: fmt.Errorf("image returned %s", resp.Status)}
 		}
 		bytes, err := io.ReadAll(io.LimitReader(resp.Body, articleImageLimit+1))
 		if err != nil {
-			return articleImageLoadedMsg{id: id, url: rawURL, err: err}
+			return articleImageLoadedMsg{screenID: screenID, id: id, url: rawURL, err: err}
 		}
 		if len(bytes) > articleImageLimit {
-			return articleImageLoadedMsg{id: id, url: rawURL, err: fmt.Errorf("image is larger than %d bytes", articleImageLimit)}
+			return articleImageLoadedMsg{screenID: screenID, id: id, url: rawURL, err: fmt.Errorf("image is larger than %d bytes", articleImageLimit)}
 		}
-		return articleImageLoadedMsg{id: id, url: rawURL, bytes: bytes}
+		return articleImageLoadedMsg{screenID: screenID, id: id, url: rawURL, bytes: bytes}
 	}
 }
 
@@ -1047,6 +1078,7 @@ func isBlankRenderedLine(line string) bool {
 }
 
 func renderMarkdown(markdown string, width int) string {
+	markdown = repairLooseListItems(markdown)
 	markdown = fenceLooseArticleCode(markdown)
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
@@ -1060,6 +1092,59 @@ func renderMarkdown(markdown string, width int) string {
 		return markdown
 	}
 	return out
+}
+
+func repairLooseListItems(markdown string) string {
+	lines := strings.Split(markdown, "\n")
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if !isMarkdownListItem(line) {
+			out = append(out, line)
+			continue
+		}
+
+		item := line
+		for i+2 < len(lines) && strings.TrimSpace(lines[i+1]) == "" {
+			next := strings.TrimSpace(lines[i+2])
+			if next == "" || startsMarkdownBlock(next) {
+				break
+			}
+			item = strings.TrimRight(item, " ") + " " + next
+			i += 2
+		}
+		out = append(out, item)
+	}
+	return strings.Join(out, "\n")
+}
+
+func isMarkdownListItem(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 3 {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || strings.HasPrefix(trimmed, "+ ") {
+		return true
+	}
+	for i, r := range trimmed {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		return i > 0 && (r == '.' || r == ')') && len(trimmed) > i+1 && trimmed[i+1] == ' '
+	}
+	return false
+}
+
+func startsMarkdownBlock(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "#") ||
+		strings.HasPrefix(trimmed, ">") ||
+		strings.HasPrefix(trimmed, "```") ||
+		strings.HasPrefix(trimmed, "~~~") ||
+		strings.HasPrefix(trimmed, "---") ||
+		strings.HasPrefix(trimmed, "***") ||
+		strings.HasPrefix(trimmed, "___") ||
+		strings.HasPrefix(trimmed, "| ") ||
+		isMarkdownListItem(trimmed)
 }
 
 func fenceLooseArticleCode(markdown string) string {

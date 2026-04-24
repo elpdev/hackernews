@@ -7,5 +7,6 @@ type Command struct {
 	Title       string
 	Description string
 	Keywords    []string
+	Order       int
 	Run         func() tea.Cmd
 }

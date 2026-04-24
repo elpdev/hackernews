@@ -45,16 +45,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	if m.showCommandPalette {
-		palette, cmd := m.commandPalette.Update(msg)
-		m.commandPalette = palette
-		return m, cmd
+	if targeted, ok := msg.(screens.TargetedMsg); ok {
+		if id := targeted.TargetScreenID(); id != "" {
+			return m.updateScreen(id, msg)
+		}
 	}
 
-	active := m.screens[m.activeScreen]
-	updated, cmd := active.Update(msg)
-	m.screens[m.activeScreen] = updated
-	return m, cmd
+	return m.updateScreen(m.activeScreen, msg)
 }
 
 type commandsExecutedMsg struct {
@@ -173,6 +170,17 @@ func (m Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.switchScreen(m.screenOrder[idx])
 	return m, m.initScreenIfNeeded(m.activeScreen)
+}
+
+func (m Model) updateScreen(id string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	active, ok := m.screens[id]
+	if !ok {
+		m.logs.Warn(fmt.Sprintf("Message targeted unknown screen: %s", id))
+		return m, nil
+	}
+	updated, cmd := active.Update(msg)
+	m.screens[id] = updated
+	return m, cmd
 }
 
 func (m Model) initScreenIfNeeded(id string) tea.Cmd {
