@@ -6,15 +6,22 @@ import (
 	"html"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/hn"
 )
+
+var articleRenderCache = struct {
+	sync.Mutex
+	lines map[string][]string
+}{lines: make(map[string][]string)}
 
 const (
 	topStoryLimit     = 500
@@ -34,6 +41,7 @@ type Top struct {
 	listTop  int
 	readID   int
 	readTop  int
+	readLine int
 	loading  string
 	err      string
 }
@@ -111,6 +119,7 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		t.articles[msg.id] = msg.article
 		t.readID = msg.id
 		t.readTop = 0
+		t.readLine = 0
 		return t, nil
 	case tea.KeyPressMsg:
 		return t.handleKey(msg)
@@ -150,20 +159,23 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		case "esc":
 			t.readID = 0
 			t.readTop = 0
+			t.readLine = 0
+			return t, nil
 		case "up", "k":
-			if t.readTop > 0 {
-				t.readTop--
+			if t.readLine > 0 {
+				t.readLine--
 			}
 		case "down", "j":
-			t.readTop++
+			t.readLine++
 		case "pgup":
-			t.readTop -= 10
-			if t.readTop < 0 {
-				t.readTop = 0
+			t.readLine -= 10
+			if t.readLine < 0 {
+				t.readLine = 0
 			}
 		case "pgdown":
-			t.readTop += 10
+			t.readLine += 10
 		}
+		t.readLine = clampIndex(t.readLine, cachedArticleLineCount(t.readID))
 		return t, nil
 	}
 
@@ -212,6 +224,7 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		if _, ok := t.articles[story.ID]; ok {
 			t.readID = story.ID
 			t.readTop = 0
+			t.readLine = 0
 			return t, nil
 		}
 		t.loading = "Fetching article..."
@@ -333,21 +346,18 @@ func (t Top) listView(width, height int) string {
 
 func (t Top) articleView(width, height int) string {
 	article := t.articles[t.readID]
-	rendered := renderMarkdown(article.Markdown, width)
-	header := []string{article.Title}
-	meta := articleMeta(article)
-	if meta != "" {
-		header = append(header, meta)
-	}
-	header = append(header, "esc back | j/k scroll | pgup/pgdn page")
+	header := []string{"esc back | j/k move highlight | pgup/pgdn jump"}
 	if t.err != "" {
 		header = append(header, t.err)
 	}
 	contentHeight := maxScreen(1, height-len(header)-1)
-	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	lines := renderedArticleLines(t.readID, width, article)
 	maxTop := maxScreen(0, len(lines)-contentHeight)
-	top := t.readTop
-	if top > maxTop {
+	cursor := clampIndex(t.readLine, len(lines))
+	top := cursor - contentHeight/2
+	if top < 0 {
+		top = 0
+	} else if top > maxTop {
 		top = maxTop
 	}
 	end := minScreen(len(lines), top+contentHeight)
@@ -355,14 +365,72 @@ func (t Top) articleView(width, height int) string {
 	for _, line := range header {
 		b.WriteString(truncateScreen(line, width) + "\n")
 	}
-	if end > top {
-		b.WriteString(strings.Join(lines[top:end], "\n"))
+	for i := top; i < end; i++ {
+		line := lines[i]
+		if i == cursor {
+			line = articleLineHighlight(width).Render(padLine(ansi.Strip(line), width))
+		}
+		b.WriteString(line)
+		if i < end-1 {
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }
 
+func articleLineHighlight(width int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FDE68A")).
+		Background(lipgloss.Color("#334155")).
+		MaxWidth(maxScreen(0, width))
+}
+
+func padLine(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	lineWidth := lipgloss.Width(line)
+	if lineWidth >= width {
+		return line
+	}
+	return line + strings.Repeat(" ", width-lineWidth)
+}
+
+func renderedArticleLines(id, width int, article articles.Article) []string {
+	key := fmt.Sprintf("%d:%d", id, width)
+	articleRenderCache.Lock()
+	if lines, ok := articleRenderCache.lines[key]; ok {
+		articleRenderCache.Unlock()
+		return lines
+	}
+	articleRenderCache.Unlock()
+
+	rendered := renderMarkdown(articleMarkdown(article), width)
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	articleRenderCache.Lock()
+	articleRenderCache.lines[key] = lines
+	articleRenderCache.Unlock()
+	return lines
+}
+
+func cachedArticleLineCount(id int) int {
+	prefix := fmt.Sprintf("%d:", id)
+	articleRenderCache.Lock()
+	defer articleRenderCache.Unlock()
+	for key, lines := range articleRenderCache.lines {
+		if strings.HasPrefix(key, prefix) {
+			return len(lines)
+		}
+	}
+	return 0
+}
+
 func renderMarkdown(markdown string, width int) string {
-	r, err := glamour.NewTermRenderer(glamour.WithWordWrap(maxScreen(20, width)))
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(maxScreen(20, width)),
+	)
 	if err != nil {
 		return markdown
 	}
@@ -371,6 +439,22 @@ func renderMarkdown(markdown string, width int) string {
 		return markdown
 	}
 	return out
+}
+
+func articleMarkdown(article articles.Article) string {
+	var b strings.Builder
+	if article.Title != "" {
+		b.WriteString("# ")
+		b.WriteString(article.Title)
+		b.WriteString("\n\n")
+	}
+	if meta := articleMeta(article); meta != "" {
+		b.WriteString("> ")
+		b.WriteString(meta)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(article.Markdown)
+	return b.String()
 }
 
 func articleMeta(article articles.Article) string {
