@@ -1448,16 +1448,44 @@ func looseIndentDelta(line string) int {
 func looseCodeLanguages(lines []string) []string {
 	langs := make([]string, 0, 3)
 	for _, line := range lines {
-		switch strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-"))) {
-		case "curl", "shell", "bash", "sh":
-			langs = append(langs, "bash")
-		case "python", "py":
-			langs = append(langs, "python")
-		case "nodejs", "node", "javascript", "js", "typescript", "ts":
-			langs = append(langs, "javascript")
+		if lang := normalizeCodeLanguage(line); lang != "" {
+			langs = append(langs, lang)
 		}
 	}
 	return langs
+}
+
+func normalizeCodeLanguage(line string) string {
+	lang := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-")))
+	lang = strings.Trim(lang, "`:")
+	switch lang {
+	case "curl", "shell", "bash", "sh", "zsh", "fish", "terminal", "console":
+		return "bash"
+	case "python", "py":
+		return "python"
+	case "nodejs", "node", "javascript", "js", "typescript", "ts":
+		return "javascript"
+	case "ruby", "rb", "rails":
+		return "ruby"
+	case "golang", "go":
+		return "go"
+	case "rust", "rs":
+		return "rust"
+	case "java":
+		return "java"
+	case "c", "cpp", "c++", "cc", "h", "hpp":
+		return "cpp"
+	case "c#", "csharp", "cs":
+		return "csharp"
+	case "kotlin", "kt":
+		return "kotlin"
+	case "yaml", "yml":
+		return "yaml"
+	case "php", "swift", "scala", "sql", "html", "css", "json", "xml", "toml", "dockerfile":
+		return lang
+	default:
+		return ""
+	}
 }
 
 func isLooseCodeStart(line string) bool {
@@ -1477,6 +1505,14 @@ func inferLooseCodeLanguage(line string) string {
 		return "python"
 	case strings.HasPrefix(code, "//"), strings.HasPrefix(code, "const "), strings.HasPrefix(code, "let "), strings.HasPrefix(code, "async function"):
 		return "javascript"
+	case strings.HasPrefix(code, "require "), strings.HasPrefix(code, "module "), strings.HasPrefix(code, "def "), strings.HasPrefix(code, "puts "):
+		return "ruby"
+	case strings.HasPrefix(code, "class ") && !strings.Contains(code, "{"):
+		return "ruby"
+	case strings.HasPrefix(code, "package main"), strings.HasPrefix(code, "func "):
+		return "go"
+	case strings.HasPrefix(code, "use "), strings.HasPrefix(code, "fn "), strings.HasPrefix(code, "impl "):
+		return "rust"
 	default:
 		return ""
 	}
