@@ -12,3 +12,7 @@ type Screen interface {
 	Title() string
 	KeyBindings() []key.Binding
 }
+
+type KeyCapturer interface {
+	CapturesKey(tea.KeyPressMsg) bool
+}
