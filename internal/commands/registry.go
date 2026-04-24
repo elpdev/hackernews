@@ -27,6 +27,31 @@ func (r *Registry) List() []Command {
 	for _, command := range r.commands {
 		commands = append(commands, command)
 	}
+	sortCommands(commands)
+	return commands
+}
+
+func (r *Registry) Children(parentID string) []Command {
+	commands := make([]Command, 0)
+	for _, command := range r.commands {
+		if command.ParentID == parentID {
+			commands = append(commands, command)
+		}
+	}
+	sortCommands(commands)
+	return commands
+}
+
+func (r *Registry) HasChildren(id string) bool {
+	for _, command := range r.commands {
+		if command.ParentID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func sortCommands(commands []Command) {
 	sort.Slice(commands, func(i, j int) bool {
 		if commands[i].Order != commands[j].Order {
 			if commands[i].Order == 0 {
@@ -39,7 +64,6 @@ func (r *Registry) List() []Command {
 		}
 		return commands[i].Title < commands[j].Title
 	})
-	return commands
 }
 
 func (r *Registry) Filter(query string) []Command {
