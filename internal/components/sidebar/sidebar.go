@@ -3,6 +3,7 @@ package sidebar
 import (
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/elpdev/hackernews/internal/theme"
 )
 
@@ -18,9 +19,8 @@ type Model struct {
 }
 
 func View(m Model, width, height int, t theme.Theme) string {
-	frameWidth, frameHeight := t.Sidebar.GetFrameSize()
-	innerWidth := max(0, width-frameWidth)
-	innerHeight := max(0, height-frameHeight)
+	frameWidth, _ := t.Sidebar.GetFrameSize()
+	contentWidth := max(0, width-frameWidth)
 	var b strings.Builder
 	if m.Focused {
 		b.WriteString(t.Title.Render("Navigation"))
@@ -29,15 +29,18 @@ func View(m Model, width, height int, t theme.Theme) string {
 	}
 	b.WriteString("\n\n")
 	for _, item := range m.Items {
-		line := item.Title
 		if item.ID == m.ActiveID {
-			line = t.Selected.Render(line)
+			b.WriteString(renderRow(t.Selected.Padding(0, 0), item.Title, contentWidth))
 		} else {
-			line = t.Text.Render("  " + line)
+			b.WriteString(renderRow(t.Text, item.Title, contentWidth))
 		}
-		b.WriteString(line + "\n")
+		b.WriteString("\n")
 	}
-	return t.Sidebar.Width(innerWidth).Height(innerHeight).Render(b.String())
+	return t.Sidebar.Width(max(0, width)).Height(max(0, height)).Align(lipgloss.Left).Render(b.String())
+}
+
+func renderRow(style lipgloss.Style, content string, width int) string {
+	return style.Width(width).Align(lipgloss.Left).Render(content)
 }
 
 func max(a, b int) int {
