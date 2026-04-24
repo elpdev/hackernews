@@ -30,6 +30,7 @@ const (
 	topStoryLimit     = 500
 	topStoriesPerPage = 100
 	articleImageLimit = 10 << 20
+	articleMaxWidth   = 100
 )
 
 type Top struct {
@@ -445,7 +446,8 @@ func (t Top) articleView(width, height int) string {
 		header = append(header, t.err)
 	}
 	contentHeight := maxScreen(1, height-len(header)-1)
-	lines := renderedArticleLines(t.readID, width, article, t.images[t.readID])
+	contentWidth := articleContentWidth(width)
+	lines := renderedArticleLines(t.readID, contentWidth, article, t.images[t.readID])
 	maxTop := maxScreen(0, len(lines)-contentHeight)
 	cursor := clampIndex(t.readLine, len(lines))
 	top := cursor - contentHeight/2
@@ -462,7 +464,7 @@ func (t Top) articleView(width, height int) string {
 	for i := top; i < end; i++ {
 		line := lines[i]
 		if i == cursor && !containsInlineImage(line) {
-			line = articleLineHighlight(width).Render(padLine(ansi.Strip(line), width))
+			line = articleLineHighlight(contentWidth).Render(padLine(ansi.Strip(line), contentWidth))
 		}
 		b.WriteString(line)
 		if i < end-1 {
@@ -470,6 +472,10 @@ func (t Top) articleView(width, height int) string {
 		}
 	}
 	return media.ViewportPrefix() + b.String()
+}
+
+func articleContentWidth(width int) int {
+	return minScreen(width, articleMaxWidth)
 }
 
 func containsInlineImage(line string) bool {

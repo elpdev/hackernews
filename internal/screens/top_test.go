@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/elpdev/hackernews/internal/articles"
 )
@@ -46,6 +47,20 @@ func TestRenderedArticleLinesOmitsImageWithoutArticleImage(t *testing.T) {
 	lines := renderedArticleLines(2, 80, article, articleImage{})
 	if lineIndex(lines, "Image:") >= 0 {
 		t.Fatalf("expected no image line in %q", strings.Join(lines, "\n"))
+	}
+}
+
+func TestRenderedArticleLinesCapsWideArticleWidth(t *testing.T) {
+	articleRenderCache.lines = make(map[string][]string)
+	article := articles.Article{
+		Markdown: strings.Repeat("word ", 80),
+	}
+
+	lines := renderedArticleLines(3, articleContentWidth(140), article, articleImage{})
+	for _, line := range lines {
+		if width := lipgloss.Width(ansi.Strip(line)); width > articleMaxWidth {
+			t.Fatalf("expected line width <= %d, got %d for %q", articleMaxWidth, width, ansi.Strip(line))
+		}
 	}
 }
 
