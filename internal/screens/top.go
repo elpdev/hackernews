@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/hn"
 	"github.com/elpdev/hackernews/internal/media"
+	"github.com/elpdev/hackernews/internal/saved"
 )
 
 var articleRenderCache = struct {
@@ -36,11 +38,13 @@ const (
 type Top struct {
 	client    hn.Client
 	extractor articles.Extractor
+	saved     saved.Store
 	storyIDs  []int
 	stories   []hn.Item
 	pages     map[int][]hn.Item
 	articles  map[int]articles.Article
 	images    map[int]articleImage
+	savedIDs  map[int]bool
 
 	selected int
 	page     int
@@ -50,9 +54,30 @@ type Top struct {
 	readLine int
 	loading  string
 	err      string
+	status   string
 
 	searching   bool
 	searchQuery string
+	sortMode    sortMode
+}
+
+type sortMode int
+
+const (
+	sortDefault sortMode = iota
+	sortRecent
+	sortPoints
+)
+
+func (m sortMode) label() string {
+	switch m {
+	case sortRecent:
+		return "recent"
+	case sortPoints:
+		return "points"
+	default:
+		return ""
+	}
 }
 
 type storyListItem struct {
@@ -78,6 +103,17 @@ type articleLoadedMsg struct {
 	err     error
 }
 
+type savedIDsLoadedMsg struct {
+	ids map[int]bool
+	err error
+}
+
+type articleSavedToggledMsg struct {
+	id    int
+	saved bool
+	err   error
+}
+
 type articleImage struct {
 	url   string
 	bytes []byte
@@ -91,18 +127,24 @@ type articleImageLoadedMsg struct {
 	err   error
 }
 
-func NewTop() Top {
+func NewTop(stores ...saved.Store) Top {
+	var store saved.Store
+	if len(stores) > 0 {
+		store = stores[0]
+	}
 	return Top{
 		client:    hn.NewClient(nil),
 		extractor: articles.NewTrafilaturaExtractor(),
+		saved:     store,
 		pages:     make(map[int][]hn.Item),
 		articles:  make(map[int]articles.Article),
 		images:    make(map[int]articleImage),
+		savedIDs:  make(map[int]bool),
 		loading:   "Loading top stories...",
 	}
 }
 
-func (t Top) Init() tea.Cmd { return t.loadStories() }
+func (t Top) Init() tea.Cmd { return tea.Batch(t.loadStories(), t.loadSavedIDs()) }
 
 func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -149,6 +191,29 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		t.readTop = 0
 		t.readLine = 0
 		return t.startArticleImageLoad(msg.id, msg.article)
+	case savedIDsLoadedMsg:
+		if msg.err != nil {
+			t.status = "Could not load saved articles: " + msg.err.Error()
+			return t, nil
+		}
+		t.savedIDs = msg.ids
+		return t, nil
+	case articleSavedToggledMsg:
+		if msg.err != nil {
+			t.status = "Could not update saved article: " + msg.err.Error()
+			return t, nil
+		}
+		if t.savedIDs == nil {
+			t.savedIDs = make(map[int]bool)
+		}
+		if msg.saved {
+			t.savedIDs[msg.id] = true
+			t.status = "Article saved"
+		} else {
+			delete(t.savedIDs, msg.id)
+			t.status = "Article removed from saved"
+		}
+		return t, nil
 	case articleImageLoadedMsg:
 		if msg.err != nil {
 			t.images[msg.id] = articleImage{url: msg.url, err: msg.err.Error()}
@@ -185,7 +250,9 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next 100")),
 		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
+		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
+		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save/unsave")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
@@ -198,6 +265,8 @@ func (t Top) CapturesKey(msg tea.KeyPressMsg) bool {
 func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	if t.readID != 0 {
 		switch msg.String() {
+		case "s":
+			return t, t.toggleSaved(t.readID)
 		case "esc":
 			t.readID = 0
 			t.readTop = 0
@@ -229,7 +298,7 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	case "r":
 		t.loading = "Loading top stories..."
 		t.err = ""
-		return t, t.loadStories()
+		return t, tea.Batch(t.loadStories(), t.loadSavedIDs())
 	case "/":
 		t.searching = true
 		return t, nil
@@ -238,8 +307,13 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		t.selected = 0
 		t.listTop = 0
 		return t, nil
+	case "o":
+		t.sortMode = (t.sortMode + 1) % 3
+		t.selected = 0
+		t.listTop = 0
+		return t, nil
 	}
-	matches := t.filteredStories()
+	matches := t.sortedFilteredStories()
 	if len(matches) == 0 {
 		return t, nil
 	}
@@ -286,6 +360,8 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		t.loading = "Fetching article..."
 		t.err = ""
 		return t, t.loadArticle(story)
+	case "s":
+		return t, t.toggleSaved(matches[t.selected].story.ID)
 	}
 	return t, nil
 }
@@ -336,6 +412,78 @@ func (t Top) loadStories() tea.Cmd {
 		stories, err := t.client.Stories(ctx, ids[:end])
 		return topStoriesLoadedMsg{ids: ids, stories: stories, err: err}
 	}
+}
+
+func (t Top) loadSavedIDs() tea.Cmd {
+	if t.saved == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		items, err := t.saved.List(ctx)
+		if err != nil {
+			return savedIDsLoadedMsg{err: err}
+		}
+		ids := make(map[int]bool, len(items))
+		for _, item := range items {
+			ids[item.ID] = true
+		}
+		return savedIDsLoadedMsg{ids: ids}
+	}
+}
+
+func (t Top) toggleSaved(id int) tea.Cmd {
+	if t.saved == nil {
+		return func() tea.Msg {
+			return articleSavedToggledMsg{id: id, err: fmt.Errorf("saved article store is unavailable")}
+		}
+	}
+	story, ok := t.storyByID(id)
+	if !ok {
+		story = hn.Item{ID: id, Type: "story"}
+	}
+	article := t.articleForStory(story)
+	alreadySaved := t.savedIDs[id]
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if alreadySaved {
+			return articleSavedToggledMsg{id: id, saved: false, err: t.saved.Delete(ctx, id)}
+		}
+		return articleSavedToggledMsg{id: id, saved: true, err: t.saved.Save(ctx, story, article)}
+	}
+}
+
+func (t Top) storyByID(id int) (hn.Item, bool) {
+	for _, page := range t.pages {
+		for _, story := range page {
+			if story.ID == id {
+				return story, true
+			}
+		}
+	}
+	for _, story := range t.stories {
+		if story.ID == id {
+			return story, true
+		}
+	}
+	return hn.Item{}, false
+}
+
+func (t Top) articleForStory(story hn.Item) articles.Article {
+	if article, ok := t.articles[story.ID]; ok {
+		return article
+	}
+	articleURL := strings.TrimSpace(story.URL)
+	if articleURL == "" {
+		articleURL = fmt.Sprintf("https://news.ycombinator.com/item?id=%d", story.ID)
+	}
+	article := articles.Article{Title: story.Title, Author: story.By, URL: articleURL}
+	if strings.TrimSpace(story.Text) != "" {
+		article.Markdown = hnTextMarkdown(story)
+	}
+	return article
 }
 
 func (t Top) goToPage(page int) (Screen, tea.Cmd) {
@@ -464,12 +612,16 @@ func (t Top) listView(width, height int) string {
 	if t.err != "" {
 		b.WriteString(t.err + "\n")
 	}
+	if t.status != "" {
+		b.WriteString(t.status + "\n")
+	}
 	if len(t.stories) == 0 {
 		if t.loading == "" {
 			b.WriteString("Press r to load top stories.\n")
 		}
 		return b.String()
 	}
+	sortLabel := t.sortMode.label()
 	if t.searching || t.searchQuery != "" {
 		label := "Filter"
 		if t.searching {
@@ -479,17 +631,23 @@ func (t Top) listView(width, height int) string {
 		if query == "" {
 			query = lipgloss.NewStyle().Faint(true).Render("type to filter...")
 		}
-		b.WriteString(truncateScreen(label+": "+query, width) + "\n")
+		line := label + ": " + query
+		if sortLabel != "" {
+			line += " | sort: " + sortLabel
+		}
+		b.WriteString(truncateScreen(line, width) + "\n")
+	} else if sortLabel != "" {
+		b.WriteString(truncateScreen("Sort: "+sortLabel, width) + "\n")
 	}
 
-	matches := t.filteredStories()
+	matches := t.sortedFilteredStories()
 	if len(matches) == 0 {
 		b.WriteString(fmt.Sprintf("No stories match %q. Press ctrl+u to clear.\n", t.searchQuery))
 		return b.String()
 	}
 	selectedInPage := clampIndex(t.selected, len(matches))
 	listHeight := maxScreen(1, (height-3)/3)
-	if t.searching || t.searchQuery != "" {
+	if t.searching || t.searchQuery != "" || sortLabel != "" {
 		listHeight = maxScreen(1, (height-4)/3)
 	}
 	if selectedInPage < t.listTop {
@@ -504,11 +662,14 @@ func (t Top) listView(width, height int) string {
 	for i := t.listTop; i < end; i++ {
 		item := matches[i]
 		story := item.story
-		line := fmt.Sprintf("%2d. %s", t.page*topStoriesPerPage+item.index+1, story.Title)
+		line := fmt.Sprintf("%2d. %s", item.index+1, story.Title)
 		if domain := storyDomain(story.URL); domain != "" {
 			line += " (" + domain + ")"
 		}
 		meta := fmt.Sprintf("     %d points by %s | %d comments", story.Score, story.By, story.Descendants)
+		if t.savedIDs[story.ID] {
+			meta += " | saved"
+		}
 		if i == selectedInPage {
 			title := "> " + truncateScreen(line, maxScreen(0, width-2))
 			b.WriteString(selectedStyle.Render(padLine(title, width)) + "\n")
@@ -521,21 +682,70 @@ func (t Top) listView(width, height int) string {
 			b.WriteString("\n")
 		}
 	}
-	footer := fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | n/p next/prev 100 | j/k scroll | enter read | r refresh", t.page+1, t.pageCount(), t.page*topStoriesPerPage+matches[t.listTop].index+1, t.page*topStoriesPerPage+matches[end-1].index+1, len(t.storyIDs))
+	footer := fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | n/p next/prev 100 | j/k scroll | enter read | s save | r refresh", t.page+1, t.pageCount(), t.page*topStoriesPerPage+matches[t.listTop].index+1, t.page*topStoriesPerPage+matches[end-1].index+1, len(t.storyIDs))
 	if t.searchQuery != "" {
-		footer = fmt.Sprintf("Page %d/%d | %d matches on page | / edit search | ctrl+u clear | enter read", t.page+1, t.pageCount(), len(matches))
+		footer = fmt.Sprintf("Page %d/%d | %d matches on page | / edit search | ctrl+u clear | enter read | s save", t.page+1, t.pageCount(), len(matches))
 	}
 	b.WriteString(truncateScreen(footer, width))
 	return b.String()
 }
 
-func (t Top) filteredStories() []storyListItem {
-	query := strings.ToLower(strings.TrimSpace(t.searchQuery))
-	items := make([]storyListItem, 0, len(t.stories))
-	for i, story := range t.stories {
-		if query == "" || storyMatchesQuery(story, query) {
-			items = append(items, storyListItem{index: i, story: story})
+// allLoadedStories returns every story cached in t.pages, ordered by HN rank.
+// Each item's index is its global rank (position in t.storyIDs).
+func (t Top) allLoadedStories() []storyListItem {
+	loaded := make(map[int]hn.Item, len(t.pages)*topStoriesPerPage)
+	for _, page := range t.pages {
+		for _, story := range page {
+			loaded[story.ID] = story
 		}
+	}
+	for _, story := range t.stories {
+		loaded[story.ID] = story
+	}
+	items := make([]storyListItem, 0, len(loaded))
+	for rank, id := range t.storyIDs {
+		if story, ok := loaded[id]; ok {
+			items = append(items, storyListItem{index: rank, story: story})
+		}
+	}
+	return items
+}
+
+func (t Top) filteredStories() []storyListItem {
+	var scope []storyListItem
+	if t.searchQuery != "" || t.sortMode != sortDefault {
+		scope = t.allLoadedStories()
+	} else {
+		scope = make([]storyListItem, 0, len(t.stories))
+		base := t.page * topStoriesPerPage
+		for i, story := range t.stories {
+			scope = append(scope, storyListItem{index: base + i, story: story})
+		}
+	}
+	query := strings.ToLower(strings.TrimSpace(t.searchQuery))
+	if query == "" {
+		return scope
+	}
+	out := scope[:0]
+	for _, item := range scope {
+		if storyMatchesQuery(item.story, query) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func (t Top) sortedFilteredStories() []storyListItem {
+	items := t.filteredStories()
+	switch t.sortMode {
+	case sortRecent:
+		sort.SliceStable(items, func(i, j int) bool {
+			return items[i].story.Time > items[j].story.Time
+		})
+	case sortPoints:
+		sort.SliceStable(items, func(i, j int) bool {
+			return items[i].story.Score > items[j].story.Score
+		})
 	}
 	return items
 }
@@ -552,9 +762,16 @@ func storyMatchesQuery(story hn.Item, query string) bool {
 
 func (t Top) articleView(width, height int) string {
 	article := t.articles[t.readID]
-	header := []string{"esc back | j/k move highlight | pgup/pgdn jump"}
+	saveHelp := "s save"
+	if t.savedIDs[t.readID] {
+		saveHelp = "s unsave"
+	}
+	header := []string{"esc back | " + saveHelp + " | j/k move highlight | pgup/pgdn jump"}
 	if t.err != "" {
 		header = append(header, t.err)
+	}
+	if t.status != "" {
+		header = append(header, t.status)
 	}
 	contentHeight := maxScreen(1, height-len(header)-1)
 	contentWidth := articleContentWidth(width)

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/elpdev/hackernews/internal/commands"
 	"github.com/elpdev/hackernews/internal/debug"
+	"github.com/elpdev/hackernews/internal/saved"
 	"github.com/elpdev/hackernews/internal/screens"
 	"github.com/elpdev/hackernews/internal/theme"
 )
@@ -36,6 +37,7 @@ type Model struct {
 
 	commands       *commands.Registry
 	commandPalette commands.PaletteModel
+	savedStore     saved.Store
 
 	theme theme.Theme
 	logs  *debug.Log
@@ -45,6 +47,12 @@ type Model struct {
 func New(meta BuildInfo) Model {
 	log := debug.NewLog()
 	log.Info("App started")
+	var savedStore saved.Store
+	if path, err := saved.DefaultPath(); err != nil {
+		log.Warn(fmt.Sprintf("Saved article store unavailable: %v", err))
+	} else {
+		savedStore = saved.NewJSONStore(path)
+	}
 
 	m := Model{
 		activeScreen: defaultScreen,
@@ -53,6 +61,7 @@ func New(meta BuildInfo) Model {
 		focus:        FocusMain,
 		keys:         DefaultKeyMap(),
 		commands:     commands.NewRegistry(),
+		savedStore:   savedStore,
 		theme:        theme.Phosphor(),
 		logs:         log,
 		meta:         meta,
@@ -73,7 +82,8 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m *Model) registerScreens() {
-	m.screens["top"] = screens.NewTop()
+	m.screens["top"] = screens.NewTop(m.savedStore)
+	m.screens["saved"] = screens.NewSaved(m.savedStore)
 	m.screens["home"] = screens.NewHome()
 	m.screens["settings"] = screens.NewSettings(screens.SettingsState{
 		ThemeName:      m.theme.Name,
@@ -93,7 +103,7 @@ func (m *Model) refreshScreenOrder() {
 		m.screenOrder = append(m.screenOrder, id)
 	}
 	sort.Strings(m.screenOrder)
-	preferred := []string{"top", "home", "settings", "help", "logs"}
+	preferred := []string{"top", "saved", "home", "settings", "help", "logs"}
 	ordered := make([]string, 0, len(m.screenOrder))
 	seen := make(map[string]bool)
 	for _, id := range preferred {
@@ -112,6 +122,7 @@ func (m *Model) refreshScreenOrder() {
 
 func (m *Model) registerCommands() {
 	m.commands.Register(commands.Command{ID: "go-top", Title: "Go to Top Stories", Description: "Open Hacker News top stories", Keywords: []string{"top", "hacker news", "stories", "news"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"top"} } }})
+	m.commands.Register(commands.Command{ID: "go-saved", Title: "Go to Saved", Description: "Open saved articles", Keywords: []string{"saved", "articles", "bookmarks", "offline"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"saved"} } }})
 	m.commands.Register(commands.Command{ID: "go-home", Title: "Go to Home", Description: "Open the home screen", Keywords: []string{"home", "start"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"home"} } }})
 	m.commands.Register(commands.Command{ID: "go-settings", Title: "Go to Settings", Description: "Open application settings", Keywords: []string{"settings", "config"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"settings"} } }})
 	m.commands.Register(commands.Command{ID: "go-help", Title: "Go to Help", Description: "Open keyboard and command documentation", Keywords: []string{"help", "keys", "docs"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"help"} } }})
