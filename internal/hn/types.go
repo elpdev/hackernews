@@ -26,5 +26,12 @@ func (i Item) CreatedAt() time.Time {
 }
 
 func (i Item) Readable() bool {
-	return !i.Deleted && !i.Dead && i.Type == "story"
+	if i.Deleted || i.Dead {
+		return false
+	}
+	switch i.Type {
+	case "story", "job", "poll":
+		return true
+	}
+	return false
 }

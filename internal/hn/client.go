@@ -13,6 +13,51 @@ import (
 
 const DefaultBaseURL = "https://hacker-news.firebaseio.com/v0"
 
+type Feed string
+
+const (
+	FeedTop  Feed = "topstories"
+	FeedNew  Feed = "newstories"
+	FeedBest Feed = "beststories"
+	FeedAsk  Feed = "askstories"
+	FeedShow Feed = "showstories"
+	FeedJob  Feed = "jobstories"
+)
+
+func (f Feed) Title() string {
+	switch f {
+	case FeedNew:
+		return "New"
+	case FeedBest:
+		return "Best"
+	case FeedAsk:
+		return "Ask HN"
+	case FeedShow:
+		return "Show HN"
+	case FeedJob:
+		return "Jobs"
+	default:
+		return "Top Stories"
+	}
+}
+
+func (f Feed) ScreenID() string {
+	switch f {
+	case FeedNew:
+		return "new"
+	case FeedBest:
+		return "best"
+	case FeedAsk:
+		return "ask"
+	case FeedShow:
+		return "show"
+	case FeedJob:
+		return "jobs"
+	default:
+		return "top"
+	}
+}
+
 type Client struct {
 	baseURL string
 	http    *http.Client
@@ -31,12 +76,19 @@ func NewClientWithBaseURL(baseURL string, httpClient *http.Client) Client {
 	return c
 }
 
-func (c Client) TopStoryIDs(ctx context.Context) ([]int, error) {
+func (c Client) StoryIDs(ctx context.Context, feed Feed) ([]int, error) {
+	if feed == "" {
+		feed = FeedTop
+	}
 	var ids []int
-	if err := c.getJSON(ctx, "topstories.json", &ids); err != nil {
+	if err := c.getJSON(ctx, string(feed)+".json", &ids); err != nil {
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (c Client) TopStoryIDs(ctx context.Context) ([]int, error) {
+	return c.StoryIDs(ctx, FeedTop)
 }
 
 func (c Client) Item(ctx context.Context, id int) (Item, error) {
@@ -98,6 +150,82 @@ func (c Client) Stories(ctx context.Context, ids []int) ([]Item, error) {
 		}
 	}
 	return filtered, nil
+}
+
+// CommentTree fetches the root item and its descendant comments level-by-level
+// up to maxDepth. Stops early once totalCap items have been collected. Returns
+// partial results on error. Keyed by item ID; tree shape is reconstructed via
+// each returned Item's Kids slice.
+func (c Client) CommentTree(ctx context.Context, rootID, maxDepth, totalCap int) (map[int]Item, error) {
+	if maxDepth <= 0 {
+		maxDepth = 8
+	}
+	if totalCap <= 0 {
+		totalCap = 500
+	}
+	result := make(map[int]Item)
+	root, err := c.Item(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	result[rootID] = root
+
+	sem := make(chan struct{}, 8)
+	current := []int{rootID}
+	for depth := 0; depth < maxDepth && len(current) > 0; depth++ {
+		var nextIDs []int
+		for _, id := range current {
+			for _, kid := range result[id].Kids {
+				if _, seen := result[kid]; !seen {
+					nextIDs = append(nextIDs, kid)
+				}
+			}
+		}
+		if len(nextIDs) == 0 {
+			break
+		}
+		remaining := totalCap - len(result)
+		if remaining <= 0 {
+			break
+		}
+		if len(nextIDs) > remaining {
+			nextIDs = nextIDs[:remaining]
+		}
+
+		fetched := make([]Item, len(nextIDs))
+		errs := make(chan error, len(nextIDs))
+		var wg sync.WaitGroup
+		for i, id := range nextIDs {
+			i, id := i, id
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+					defer func() { <-sem }()
+				case <-ctx.Done():
+					errs <- ctx.Err()
+					return
+				}
+				item, err := c.Item(ctx, id)
+				if err != nil {
+					errs <- err
+					return
+				}
+				fetched[i] = item
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		if err := <-errs; err != nil {
+			return result, err
+		}
+		for _, item := range fetched {
+			result[item.ID] = item
+		}
+		current = nextIDs
+	}
+	return result, nil
 }
 
 func (c Client) getJSON(ctx context.Context, path string, dest any) error {

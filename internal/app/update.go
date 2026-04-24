@@ -18,9 +18,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case routeMsg:
 		m.switchScreen(msg.ScreenID)
 		m.showCommandPalette = false
-		if msg.ScreenID == "saved" {
-			return m, m.screens[msg.ScreenID].Init()
+		return m, m.initScreenIfNeeded(msg.ScreenID)
+	case screens.NavigateMsg:
+		m.switchScreen(msg.ScreenID)
+		return m, m.initScreenIfNeeded(msg.ScreenID)
+	case screens.OpenCommentsMsg:
+		if existing, ok := m.screens["comments"].(screens.Comments); ok {
+			updated, cmd := existing.Open(msg.Story, msg.ReturnTo)
+			m.screens["comments"] = updated
+			m.switchScreen("comments")
+			return m, cmd
 		}
+		m.logs.Warn("Comments screen unavailable")
 		return m, nil
 	case toggleSidebarMsg:
 		m.showSidebar = !m.showSidebar
@@ -163,8 +172,20 @@ func (m Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.switchScreen(m.screenOrder[idx])
-	if m.activeScreen == "saved" {
-		return m, m.screens[m.activeScreen].Init()
+	return m, m.initScreenIfNeeded(m.activeScreen)
+}
+
+func (m Model) initScreenIfNeeded(id string) tea.Cmd {
+	screen, ok := m.screens[id]
+	if !ok {
+		return nil
 	}
-	return m, nil
+	if id == "saved" {
+		return screen.Init()
+	}
+	if m.initialized[id] {
+		return nil
+	}
+	m.initialized[id] = true
+	return screen.Init()
 }

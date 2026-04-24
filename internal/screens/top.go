@@ -38,6 +38,7 @@ const (
 )
 
 type Top struct {
+	feed      hn.Feed
 	client    hn.Client
 	extractor articles.Extractor
 	opener    func(string) error
@@ -136,7 +137,15 @@ func NewTop(stores ...saved.Store) Top {
 	if len(stores) > 0 {
 		store = stores[0]
 	}
+	return NewStories(store, hn.FeedTop)
+}
+
+func NewStories(store saved.Store, feed hn.Feed) Top {
+	if feed == "" {
+		feed = hn.FeedTop
+	}
 	return Top{
+		feed:      feed,
 		client:    hn.NewClient(nil),
 		extractor: articles.NewTrafilaturaExtractor(),
 		opener:    browser.Open,
@@ -146,7 +155,7 @@ func NewTop(stores ...saved.Store) Top {
 		articles:  make(map[int]articles.Article),
 		images:    make(map[int]articleImage),
 		savedIDs:  make(map[int]bool),
-		loading:   "Loading top stories...",
+		loading:   "Loading " + strings.ToLower(feed.Title()) + "...",
 	}
 }
 
@@ -244,7 +253,12 @@ func (t Top) View(width, height int) string {
 	return t.listView(width, height)
 }
 
-func (t Top) Title() string { return "Top Stories" }
+func (t Top) Title() string {
+	if t.feed == "" {
+		return hn.FeedTop.Title()
+	}
+	return t.feed.Title()
+}
 
 func (t Top) KeyBindings() []key.Binding {
 	return []key.Binding{
@@ -259,6 +273,7 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
 		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort / open in browser")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
+		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comments")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save/unsave")),
 		key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy url")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
@@ -314,7 +329,7 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 
 	switch msg.String() {
 	case "r":
-		t.loading = "Loading top stories..."
+		t.loading = "Loading " + strings.ToLower(t.feedTitle()) + "..."
 		t.err = ""
 		return t, tea.Batch(t.loadStories(), t.loadSavedIDs())
 	case "/":
@@ -378,6 +393,11 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		t.loading = "Fetching article..."
 		t.err = ""
 		return t, t.loadArticle(story)
+	case "c":
+		story := matches[t.selected].story
+		return t, func() tea.Msg {
+			return OpenCommentsMsg{Story: story, ReturnTo: t.screenID()}
+		}
 	case "s":
 		return t, t.toggleSaved(matches[t.selected].story.ID)
 	case "y":
@@ -418,10 +438,14 @@ func (t Top) handleSearchKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 }
 
 func (t Top) loadStories() tea.Cmd {
+	feed := t.feed
+	if feed == "" {
+		feed = hn.FeedTop
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		ids, err := t.client.TopStoryIDs(ctx)
+		ids, err := t.client.StoryIDs(ctx, feed)
 		if err != nil {
 			return topStoriesLoadedMsg{err: err}
 		}
@@ -432,6 +456,27 @@ func (t Top) loadStories() tea.Cmd {
 		stories, err := t.client.Stories(ctx, ids[:end])
 		return topStoriesLoadedMsg{ids: ids, stories: stories, err: err}
 	}
+}
+
+func (t Top) feedTitle() string {
+	if t.feed == "" {
+		return hn.FeedTop.Title()
+	}
+	return t.feed.Title()
+}
+
+func (t Top) screenID() string {
+	if t.feed == "" {
+		return hn.FeedTop.ScreenID()
+	}
+	return t.feed.ScreenID()
+}
+
+func (t Top) listHeader() string {
+	if t.feed == "" || t.feed == hn.FeedTop {
+		return "Top Hacker News"
+	}
+	return "Hacker News · " + t.feed.Title()
 }
 
 func (t Top) loadSavedIDs() tea.Cmd {
@@ -670,7 +715,7 @@ func (t Top) loadArticleImage(id int, rawURL string) tea.Cmd {
 
 func (t Top) listView(width, height int) string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("Top Hacker News"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render(t.listHeader()))
 	b.WriteString("\n\n")
 	if t.loading != "" {
 		b.WriteString(t.loading + "\n")
@@ -683,7 +728,7 @@ func (t Top) listView(width, height int) string {
 	}
 	if len(t.stories) == 0 {
 		if t.loading == "" {
-			b.WriteString("Press r to load top stories.\n")
+			b.WriteString("Press r to load " + strings.ToLower(t.feedTitle()) + ".\n")
 		}
 		return b.String()
 	}

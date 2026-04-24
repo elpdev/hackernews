@@ -15,11 +15,11 @@ func TestSwitchScreenForTest(t *testing.T) {
 	}
 }
 
-func TestSidebarClosedByDefault(t *testing.T) {
+func TestSidebarOpenByDefault(t *testing.T) {
 	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
 
-	if model.showSidebar {
-		t.Fatal("expected sidebar to be closed by default")
+	if !model.showSidebar {
+		t.Fatal("expected sidebar to be open by default")
 	}
 }
 
@@ -81,10 +81,13 @@ func TestCapturedScreenKeyBypassesGlobalQuit(t *testing.T) {
 
 func TestSidebarNavigationInitializesSavedScreen(t *testing.T) {
 	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
-	updated, _ := model.Update(toggleSidebarMsg{})
-	model = updated.(Model)
 	model = sendKey(t, model, tea.Key{Code: tea.KeyTab})
-	model = sendKey(t, model, tea.Key{Code: tea.KeyDown})
+	for m := range model.screenOrder {
+		if model.screenOrder[m] == "saved" {
+			break
+		}
+		model = sendKey(t, model, tea.Key{Code: tea.KeyDown})
+	}
 
 	updated, cmd := model.Update(keyPress(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(Model)

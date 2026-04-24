@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/elpdev/hackernews/internal/commands"
 	"github.com/elpdev/hackernews/internal/debug"
+	"github.com/elpdev/hackernews/internal/hn"
 	"github.com/elpdev/hackernews/internal/saved"
 	"github.com/elpdev/hackernews/internal/screens"
 	"github.com/elpdev/hackernews/internal/theme"
@@ -27,6 +28,7 @@ type Model struct {
 	activeScreen string
 	screens      map[string]screens.Screen
 	screenOrder  []string
+	initialized  map[string]bool
 
 	showSidebar        bool
 	showHelp           bool
@@ -57,7 +59,8 @@ func New(meta BuildInfo) Model {
 	m := Model{
 		activeScreen: defaultScreen,
 		screens:      make(map[string]screens.Screen),
-		showSidebar:  false,
+		initialized:  make(map[string]bool),
+		showSidebar:  true,
 		focus:        FocusMain,
 		keys:         DefaultKeyMap(),
 		commands:     commands.NewRegistry(),
@@ -75,15 +78,22 @@ func New(meta BuildInfo) Model {
 
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{func() tea.Msg { return tea.RequestWindowSize() }}
-	for _, screen := range m.screens {
-		cmds = append(cmds, screen.Init())
+	if active, ok := m.screens[m.activeScreen]; ok {
+		m.initialized[m.activeScreen] = true
+		cmds = append(cmds, active.Init())
 	}
 	return tea.Batch(cmds...)
 }
 
 func (m *Model) registerScreens() {
-	m.screens["top"] = screens.NewTop(m.savedStore)
+	m.screens["top"] = screens.NewStories(m.savedStore, hn.FeedTop)
+	m.screens["new"] = screens.NewStories(m.savedStore, hn.FeedNew)
+	m.screens["best"] = screens.NewStories(m.savedStore, hn.FeedBest)
+	m.screens["ask"] = screens.NewStories(m.savedStore, hn.FeedAsk)
+	m.screens["show"] = screens.NewStories(m.savedStore, hn.FeedShow)
+	m.screens["jobs"] = screens.NewStories(m.savedStore, hn.FeedJob)
 	m.screens["saved"] = screens.NewSaved(m.savedStore)
+	m.screens["comments"] = screens.NewComments(hn.NewClient(nil))
 	m.refreshScreenOrder()
 }
 
@@ -93,7 +103,8 @@ func (m *Model) refreshScreenOrder() {
 		m.screenOrder = append(m.screenOrder, id)
 	}
 	sort.Strings(m.screenOrder)
-	preferred := []string{"top", "saved"}
+	preferred := []string{"top", "new", "best", "ask", "show", "jobs", "saved"}
+	hidden := map[string]bool{"comments": true}
 	ordered := make([]string, 0, len(m.screenOrder))
 	seen := make(map[string]bool)
 	for _, id := range preferred {
@@ -103,15 +114,21 @@ func (m *Model) refreshScreenOrder() {
 		}
 	}
 	for _, id := range m.screenOrder {
-		if !seen[id] {
-			ordered = append(ordered, id)
+		if seen[id] || hidden[id] {
+			continue
 		}
+		ordered = append(ordered, id)
 	}
 	m.screenOrder = ordered
 }
 
 func (m *Model) registerCommands() {
 	m.commands.Register(commands.Command{ID: "go-top", Title: "Go to Top Stories", Description: "Open Hacker News top stories", Keywords: []string{"top", "hacker news", "stories", "news"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"top"} } }})
+	m.commands.Register(commands.Command{ID: "go-new", Title: "Go to New", Description: "Open newest Hacker News stories", Keywords: []string{"new", "newest", "recent"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"new"} } }})
+	m.commands.Register(commands.Command{ID: "go-best", Title: "Go to Best", Description: "Open best Hacker News stories", Keywords: []string{"best", "popular"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"best"} } }})
+	m.commands.Register(commands.Command{ID: "go-ask", Title: "Go to Ask HN", Description: "Open Ask HN stories", Keywords: []string{"ask", "ask hn", "questions"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"ask"} } }})
+	m.commands.Register(commands.Command{ID: "go-show", Title: "Go to Show HN", Description: "Open Show HN stories", Keywords: []string{"show", "show hn", "projects"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"show"} } }})
+	m.commands.Register(commands.Command{ID: "go-jobs", Title: "Go to Jobs", Description: "Open HN job postings", Keywords: []string{"jobs", "hiring", "careers"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"jobs"} } }})
 	m.commands.Register(commands.Command{ID: "go-saved", Title: "Go to Saved", Description: "Open saved articles", Keywords: []string{"saved", "articles", "bookmarks", "offline"}, Run: func() tea.Cmd { return func() tea.Msg { return routeMsg{"saved"} } }})
 	m.commands.Register(commands.Command{ID: "toggle-sidebar", Title: "Toggle Sidebar", Description: "Show or hide sidebar navigation", Keywords: []string{"sidebar", "layout"}, Run: func() tea.Cmd { return func() tea.Msg { return toggleSidebarMsg{} } }})
 	m.commands.Register(commands.Command{ID: "themes", Title: "Themes", Description: "Preview and select a theme", Keywords: []string{"theme", "themes", "appearance", "colors", "dark", "muted", "phosphor", "miami"}})
