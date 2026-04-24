@@ -699,6 +699,9 @@ func (t Top) allLoadedStories() []storyListItem {
 			loaded[story.ID] = story
 		}
 	}
+	for _, story := range t.stories {
+		loaded[story.ID] = story
+	}
 	items := make([]storyListItem, 0, len(loaded))
 	for rank, id := range t.storyIDs {
 		if story, ok := loaded[id]; ok {
