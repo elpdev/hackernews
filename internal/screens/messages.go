@@ -1,6 +1,9 @@
 package screens
 
-import "github.com/elpdev/hackernews/internal/hn"
+import (
+	"github.com/elpdev/hackernews/internal/config"
+	"github.com/elpdev/hackernews/internal/hn"
+)
 
 // OpenCommentsMsg is emitted by a stories screen to request drilling into a
 // story's comment thread. The app dispatcher activates the comments screen and
@@ -22,6 +25,10 @@ type HideReadToggledMsg struct {
 
 type SortModeChangedMsg struct {
 	Mode string
+}
+
+type SettingsChangedMsg struct {
+	Settings config.Settings
 }
 
 // TargetedMsg identifies async results that should be delivered to the screen

@@ -396,6 +396,12 @@ func (t *Top) SetHideRead(hide bool) {
 	t.listTop = 0
 }
 
+func (t *Top) SetSortMode(mode string) {
+	t.sortMode = sortModeFromString(mode)
+	t.selected = 0
+	t.listTop = 0
+}
+
 func (t Top) CapturesKey(msg tea.KeyPressMsg) bool {
 	return t.searching && t.readID == 0 && msg.String() != "ctrl+c"
 }

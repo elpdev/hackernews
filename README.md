@@ -17,8 +17,9 @@ The app uses the official Hacker News Firebase API for story and comment data. A
 - View article images inline when the terminal supports it.
 - Browse comment threads with collapse/expand and parent navigation.
 - Save and remove articles from a local saved list.
+- Tag saved articles for later filtering and organization.
 - Open stories in the system browser and copy URLs to the clipboard.
-- Use a command palette, help overlay, sidebar navigation, and selectable themes.
+- Use a command palette, settings screen, doctor diagnostics, help overlay, sidebar navigation, and selectable themes.
 
 ## Requirements
 
@@ -149,6 +150,7 @@ Saved screen controls:
 | `/` | Search saved articles |
 | `ctrl+u` | Clear search |
 | `O` | Cycle sort by saved date, story date, or title |
+| `t` | Edit comma-separated tags for the selected article |
 | `o` | Open selected article in browser |
 | `left` / `p`, `right` / `n` | Jump between paragraphs while reading |
 
@@ -158,9 +160,15 @@ Saved articles are stored locally at:
 ~/.hackernews/saved.json
 ```
 
-The file is written with user-only permissions. Saved entries include the HN story metadata and extracted article content so they can be revisited from the Saved screen.
+The file is written with user-only permissions. Saved entries include the HN story metadata, extracted article content, and optional tags so they can be revisited from the Saved screen.
 
 Read history and preferences are stored locally at `~/.hackernews/history.json` and `~/.hackernews/config.json`.
+
+## Settings And Doctor
+
+Open Settings from the sidebar or command palette to change existing preferences such as theme, sidebar visibility, default feed, sort mode, hide-read, and sync enabled state. Long sync fields are configured through `Setup Sync` in the command palette.
+
+Run `Doctor` from the command palette to check local storage paths and optional dependencies such as Python, Trafilatura, browser opener, clipboard tools, and Git sync setup. Press `r` on the Doctor screen to rerun checks.
 
 ## Manual Git Sync
 

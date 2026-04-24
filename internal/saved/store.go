@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/elpdev/hackernews/internal/articles"
@@ -20,6 +21,7 @@ type Article struct {
 	SavedAt time.Time        `json:"saved_at"`
 	Story   hn.Item          `json:"story"`
 	Article articles.Article `json:"article"`
+	Tags    []string         `json:"tags,omitempty"`
 }
 
 type DeletedArticle struct {
@@ -31,6 +33,7 @@ type Store interface {
 	List(context.Context) ([]Article, error)
 	Get(context.Context, int) (Article, bool, error)
 	Save(context.Context, hn.Item, articles.Article) error
+	SetTags(context.Context, int, []string) error
 	Delete(context.Context, int) error
 	IsSaved(context.Context, int) (bool, error)
 }
@@ -111,6 +114,23 @@ func (s JSONStore) Save(ctx context.Context, story hn.Item, article articles.Art
 		return err
 	}
 	return s.removeDeleted(story.ID)
+}
+
+func (s JSONStore) SetTags(ctx context.Context, id int, tags []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	items, err := s.read()
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if items[i].ID == id {
+			items[i].Tags = normalizeTags(tags)
+			return s.write(items)
+		}
+	}
+	return nil
 }
 
 func (s JSONStore) Delete(ctx context.Context, id int) error {
@@ -293,4 +313,19 @@ func sortSaved(items []Article) {
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].SavedAt.After(items[j].SavedAt)
 	})
+}
+
+func normalizeTags(tags []string) []string {
+	seen := make(map[string]bool, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		normalized = append(normalized, tag)
+	}
+	sort.Strings(normalized)
+	return normalized
 }

@@ -139,8 +139,14 @@ func MergeSaved(localSaved, remoteSaved []saved.Article, localDeleted, remoteDel
 		if item.ID == 0 {
 			continue
 		}
-		if existing, ok := articles[item.ID]; !ok || item.SavedAt.After(existing.SavedAt) || richerArticle(item, existing) {
+		if existing, ok := articles[item.ID]; !ok {
 			articles[item.ID] = item
+		} else if item.SavedAt.After(existing.SavedAt) || richerArticle(item, existing) {
+			item.Tags = mergeTags(existing.Tags, item.Tags)
+			articles[item.ID] = item
+		} else {
+			existing.Tags = mergeTags(existing.Tags, item.Tags)
+			articles[item.ID] = existing
 		}
 	}
 	deleted := make(map[int]saved.DeletedArticle)
@@ -182,6 +188,21 @@ func MergeSaved(localSaved, remoteSaved []saved.Article, localDeleted, remoteDel
 
 func richerArticle(candidate, existing saved.Article) bool {
 	return candidate.SavedAt.Equal(existing.SavedAt) && len(candidate.Article.Markdown) > len(existing.Article.Markdown)
+}
+
+func mergeTags(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	tags := make([]string, 0, len(a)+len(b))
+	for _, tag := range append(a, b...) {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags
 }
 
 func withDefaults(options Options) Options {

@@ -10,6 +10,8 @@ type quitMsg struct{}
 
 type syncNowMsg struct{}
 
+type openDoctorMsg struct{}
+
 type syncCompletedMsg struct {
 	SavedCount   int
 	ReadCount    int

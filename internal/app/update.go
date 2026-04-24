@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/elpdev/hackernews/internal/commands"
+	"github.com/elpdev/hackernews/internal/config"
 	"github.com/elpdev/hackernews/internal/screens"
 	hnsync "github.com/elpdev/hackernews/internal/sync"
 )
@@ -49,6 +50,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syncNowMsg:
 		m.logs.Info("Manual sync started")
 		return m, m.syncNow()
+	case openDoctorMsg:
+		if existing, ok := m.screens["doctor"].(screens.Doctor); ok {
+			updated, cmd := existing.Open(m.activeScreen, m.settings)
+			m.screens["doctor"] = updated
+			m.switchScreen("doctor")
+			m.showCommandPalette = false
+			return m, cmd
+		}
+		m.logs.Warn("Doctor screen unavailable")
+		return m, nil
 	case syncCompletedMsg:
 		if msg.Err != nil {
 			m.logs.Warn(fmt.Sprintf("Sync failed: %v", msg.Err))
@@ -72,6 +83,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settings.SortMode = msg.Mode
 		m.saveSettings()
 		return m, nil
+	case screens.SettingsChangedMsg:
+		return m.applySettings(msg.Settings), nil
 	case quitMsg:
 		m.logs.Info("Command executed: Quit")
 		return m, tea.Quit
@@ -219,7 +232,7 @@ func (m Model) handlePaletteAction(action commands.PaletteAction) (tea.Model, te
 		m.settings.SyncRemote = remote
 		m.settings.SyncBranch = branch
 		m.settings.SyncDir = dir
-		m.saveSettings()
+		m = m.applySettings(m.settings)
 		m.logs.Info("Sync settings saved")
 		m.showCommandPalette = false
 		m.commandPalette.Reset(m.theme.Name)
@@ -254,6 +267,27 @@ func (m Model) applyHideRead(hide bool) Model {
 		if stories, ok := screen.(screens.Top); ok {
 			stories.SetHideRead(hide)
 			m.screens[id] = stories
+		}
+	}
+	return m
+}
+
+func (m Model) applySettings(settings config.Settings) Model {
+	m.settings = settings
+	m.showSidebar = settings.ShowSidebar
+	m.theme = themeByName(settings.ThemeName)
+	m.saveSettings()
+	for id, screen := range m.screens {
+		if stories, ok := screen.(screens.Top); ok {
+			stories.SetHideRead(settings.HideRead)
+			stories.SetSortMode(settings.SortMode)
+			m.screens[id] = stories
+		}
+		if settingsScreen, ok := screen.(screens.Settings); ok {
+			m.screens[id] = settingsScreen.WithSettings(settings)
+		}
+		if doctorScreen, ok := screen.(screens.Doctor); ok {
+			m.screens[id] = doctorScreen.WithSettings(settings)
 		}
 	}
 	return m

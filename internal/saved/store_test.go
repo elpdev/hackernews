@@ -64,6 +64,9 @@ func TestJSONStoreKeepsSavedAtOnDuplicateSave(t *testing.T) {
 	if err := store.Save(ctx, hn.Item{ID: 1, Title: "Old"}, articles.Article{Title: "Old"}); err != nil {
 		t.Fatalf("first save failed: %v", err)
 	}
+	if err := store.SetTags(ctx, 1, []string{"Go", "later", "go"}); err != nil {
+		t.Fatalf("set tags failed: %v", err)
+	}
 	store.now = func() time.Time { return second }
 	if err := store.Save(ctx, hn.Item{ID: 1, Title: "New"}, articles.Article{Title: "New"}); err != nil {
 		t.Fatalf("second save failed: %v", err)
@@ -78,6 +81,27 @@ func TestJSONStoreKeepsSavedAtOnDuplicateSave(t *testing.T) {
 	}
 	if item.Story.Title != "New" {
 		t.Fatalf("expected updated story, got %+v", item.Story)
+	}
+	if len(item.Tags) != 2 || item.Tags[0] != "go" || item.Tags[1] != "later" {
+		t.Fatalf("expected duplicate save to preserve normalized tags, got %+v", item.Tags)
+	}
+}
+
+func TestJSONStoreSetTags(t *testing.T) {
+	store := NewJSONStore(filepath.Join(t.TempDir(), "saved.json"))
+	ctx := context.Background()
+	if err := store.Save(ctx, hn.Item{ID: 1, Title: "Story"}, articles.Article{}); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+	if err := store.SetTags(ctx, 1, []string{" databases ", "Go", "go", ""}); err != nil {
+		t.Fatalf("set tags failed: %v", err)
+	}
+	item, ok, err := store.Get(ctx, 1)
+	if err != nil || !ok {
+		t.Fatalf("get failed: ok=%t err=%v", ok, err)
+	}
+	if len(item.Tags) != 2 || item.Tags[0] != "databases" || item.Tags[1] != "go" {
+		t.Fatalf("unexpected tags: %+v", item.Tags)
 	}
 }
 

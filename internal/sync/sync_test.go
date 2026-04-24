@@ -82,6 +82,30 @@ func TestMergeSavedKeepsRicherArticleForSameSaveTime(t *testing.T) {
 	}
 }
 
+func TestMergeSavedUnionsTags(t *testing.T) {
+	savedAt := time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC)
+
+	items, _ := MergeSaved(
+		[]saved.Article{{ID: 1, SavedAt: savedAt, Tags: []string{"go", "later"}}},
+		[]saved.Article{{ID: 1, SavedAt: savedAt, Tags: []string{"Later", "databases"}}},
+		nil,
+		nil,
+	)
+
+	if len(items) != 1 {
+		t.Fatalf("expected one item, got %+v", items)
+	}
+	want := []string{"databases", "go", "later"}
+	if len(items[0].Tags) != len(want) {
+		t.Fatalf("expected tags %+v, got %+v", want, items[0].Tags)
+	}
+	for i := range want {
+		if items[0].Tags[i] != want[i] {
+			t.Fatalf("expected tags %+v, got %+v", want, items[0].Tags)
+		}
+	}
+}
+
 func historyByID(entries []history.Entry) map[int]history.Entry {
 	byID := make(map[int]history.Entry, len(entries))
 	for _, entry := range entries {
