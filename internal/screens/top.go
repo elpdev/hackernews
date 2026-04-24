@@ -1002,6 +1002,7 @@ func isBlankRenderedLine(line string) bool {
 }
 
 func renderMarkdown(markdown string, width int) string {
+	markdown = fenceLooseArticleCode(markdown)
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(maxScreen(20, width)),
@@ -1014,6 +1015,191 @@ func renderMarkdown(markdown string, width int) string {
 		return markdown
 	}
 	return out
+}
+
+func fenceLooseArticleCode(markdown string) string {
+	lines := strings.Split(markdown, "\n")
+	langs := looseCodeLanguages(lines)
+	out := make([]string, 0, len(lines)+len(langs)*2)
+	inCode := false
+	codeLang := "text"
+	codeLines := make([]string, 0)
+	for _, line := range lines {
+		if isLooseCodeStart(line) {
+			if inCode {
+				out = appendLooseCodeBlock(out, codeLang, codeLines)
+				out = append(out, "")
+			}
+			codeLang = "text"
+			if len(langs) > 0 {
+				codeLang = langs[0]
+				langs = langs[1:]
+			} else if inferred := inferLooseCodeLanguage(line); inferred != "" {
+				codeLang = inferred
+			}
+			codeLines = append(codeLines[:0], cleanLooseCodeStart(line))
+			inCode = true
+			continue
+		}
+		if inCode && strings.HasPrefix(strings.TrimSpace(line), "##") {
+			out = appendLooseCodeBlock(out, codeLang, codeLines)
+			codeLines = codeLines[:0]
+			inCode = false
+		}
+		if inCode {
+			codeLines = append(codeLines, line)
+			continue
+		}
+		out = append(out, line)
+	}
+	if inCode {
+		out = appendLooseCodeBlock(out, codeLang, codeLines)
+	}
+	return strings.Join(out, "\n")
+}
+
+func appendLooseCodeBlock(out []string, lang string, lines []string) []string {
+	out = append(out, "```"+lang)
+	out = append(out, indentLooseCode(lang, compactLooseCodeLines(lines))...)
+	return append(out, "```")
+}
+
+func compactLooseCodeLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = cleanLooseCodeStart(line)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func indentLooseCode(lang string, lines []string) []string {
+	switch lang {
+	case "python", "javascript":
+		return indentBracketedLooseCode(lines)
+	case "bash":
+		return indentLooseBashCode(lines)
+	default:
+		return lines
+	}
+}
+
+func indentLooseBashCode(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	inJSON := false
+	jsonIndent := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if inJSON {
+			content, quoted := strings.CutSuffix(trimmed, "'")
+			if startsWithClosingDelimiter(content) {
+				jsonIndent = maxScreen(0, jsonIndent-1)
+			}
+			if quoted {
+				out = append(out, "  "+strings.Repeat("  ", jsonIndent)+content+"'")
+				inJSON = false
+				continue
+			}
+			out = append(out, "  "+strings.Repeat("  ", jsonIndent)+content)
+			jsonIndent = maxScreen(0, jsonIndent+looseIndentDelta(content))
+			continue
+		}
+		if strings.HasPrefix(trimmed, "-d '{") && strings.TrimSpace(strings.TrimPrefix(trimmed, "-d '")) == "{" {
+			out = append(out, "  "+trimmed)
+			inJSON = true
+			jsonIndent = 1
+			continue
+		}
+		if strings.HasPrefix(trimmed, "-H ") || strings.HasPrefix(trimmed, "-d ") {
+			trimmed = "  " + trimmed
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func indentBracketedLooseCode(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	indent := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if startsWithClosingDelimiter(trimmed) {
+			indent = maxScreen(0, indent-1)
+		}
+		out = append(out, strings.Repeat("  ", indent)+trimmed)
+		indent = maxScreen(0, indent+looseIndentDelta(trimmed))
+	}
+	return out
+}
+
+func startsWithClosingDelimiter(line string) bool {
+	return strings.HasPrefix(line, ")") || strings.HasPrefix(line, "]") || strings.HasPrefix(line, "}")
+}
+
+func looseIndentDelta(line string) int {
+	delta := 0
+	for _, r := range line {
+		switch r {
+		case '(', '[', '{':
+			delta++
+		case ')', ']', '}':
+			delta--
+		}
+	}
+	if delta > 1 {
+		return 1
+	}
+	if delta < -1 {
+		return -1
+	}
+	return delta
+}
+
+func looseCodeLanguages(lines []string) []string {
+	langs := make([]string, 0, 3)
+	for _, line := range lines {
+		switch strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "-"))) {
+		case "curl", "shell", "bash", "sh":
+			langs = append(langs, "bash")
+		case "python", "py":
+			langs = append(langs, "python")
+		case "nodejs", "node", "javascript", "js", "typescript", "ts":
+			langs = append(langs, "javascript")
+		}
+	}
+	return langs
+}
+
+func isLooseCodeStart(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "```") || !strings.HasPrefix(trimmed, "`") {
+		return false
+	}
+	return inferLooseCodeLanguage(trimmed) != ""
+}
+
+func inferLooseCodeLanguage(line string) string {
+	code := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "`"))
+	switch {
+	case strings.HasPrefix(code, "curl "), strings.HasPrefix(code, "-H "), strings.HasPrefix(code, "-d "):
+		return "bash"
+	case strings.HasPrefix(code, "#"), strings.HasPrefix(code, "import "), strings.HasPrefix(code, "from "):
+		return "python"
+	case strings.HasPrefix(code, "//"), strings.HasPrefix(code, "const "), strings.HasPrefix(code, "let "), strings.HasPrefix(code, "async function"):
+		return "javascript"
+	default:
+		return ""
+	}
+}
+
+func cleanLooseCodeStart(line string) string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimLeft(line, "`")
+	line = strings.TrimRight(line, "`")
+	return strings.ReplaceAll(line, "`", "")
 }
 
 func renderArticle(article articles.Article, image articleImage, width int) string {

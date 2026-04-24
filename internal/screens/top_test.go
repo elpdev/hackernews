@@ -90,6 +90,55 @@ func TestRenderedArticleLinesCapsWideArticleWidth(t *testing.T) {
 	}
 }
 
+func TestFenceLooseArticleCodeAddsLanguageFences(t *testing.T) {
+	markdown := strings.Join([]string{
+		"- curl",
+		"- python",
+		"- nodejs",
+		"",
+		"`curl https://api.deepseek.com/chat/completions \\",
+		"-H \"Content-Type: application/json\" \\",
+		"-H \"Authorization: Bearer ${DEEPSEEK_API_KEY}\" \\",
+		"-d '{",
+		"\"model\": \"deepseek-v4-pro\",",
+		"\"messages\": [",
+		"{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"},",
+		"{\"role\": \"user\", \"content\": \"Hello!\"}",
+		"],",
+		"\"stream\": false",
+		"}'",
+		"",
+		"`# Please install OpenAI SDK first: `pip3 install openai``",
+		"import os",
+		"from openai import OpenAI",
+		"",
+		"`// Please install OpenAI SDK first: `npm install openai``",
+		"import OpenAI from \"openai\";",
+		"const openai = new OpenAI({",
+		"baseURL: 'https://api.deepseek.com',",
+		"});",
+	}, "\n")
+
+	got := fenceLooseArticleCode(markdown)
+	for _, want := range []string{"```bash", "```python", "```javascript"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in normalized markdown:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "`pip3 install openai`") || strings.Contains(got, "`npm install openai`") {
+		t.Fatalf("expected stray inline backticks removed from code opener:\n%s", got)
+	}
+	if strings.Contains(got, "import os\n\nfrom openai") {
+		t.Fatalf("expected artificial blank lines removed from code block:\n%s", got)
+	}
+	if !strings.Contains(got, "  -d '{\n    \"model\": \"deepseek-v4-pro\",\n    \"messages\": [\n      {\"role\": \"system\"") {
+		t.Fatalf("expected curl JSON payload to be indented:\n%s", got)
+	}
+	if !strings.Contains(got, "const openai = new OpenAI({\n  baseURL: 'https://api.deepseek.com',\n});") {
+		t.Fatalf("expected bracketed code to be indented:\n%s", got)
+	}
+}
+
 func TestStartArticleImageLoadRestartsCachedLoadingImage(t *testing.T) {
 	articleRenderCache.lines = make(map[string][]string)
 	top := NewTop()
