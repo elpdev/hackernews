@@ -910,8 +910,15 @@ func (t Top) listView(width, height int) string {
 			line += " | sort: " + sortLabel
 		}
 		b.WriteString(truncateScreen(line, width) + "\n")
-	} else if sortLabel != "" {
-		b.WriteString(truncateScreen("Sort: "+sortLabel, width) + "\n")
+	} else if sortLabel != "" || t.hideRead {
+		parts := make([]string, 0, 2)
+		if sortLabel != "" {
+			parts = append(parts, "sort: "+sortLabel)
+		}
+		if t.hideRead {
+			parts = append(parts, "hiding read")
+		}
+		b.WriteString(truncateScreen(strings.Join(parts, " | "), width) + "\n")
 	}
 
 	matches := t.sortedFilteredStories()
@@ -932,6 +939,7 @@ func (t Top) listView(width, height int) string {
 	}
 	end := minScreen(len(matches), t.listTop+listHeight)
 	metaStyle := lipgloss.NewStyle().Faint(true)
+	readStyle := lipgloss.NewStyle().Faint(true)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Reverse(true)
 	for i := t.listTop; i < end; i++ {
 		item := matches[i]
@@ -941,6 +949,9 @@ func (t Top) listView(width, height int) string {
 			line += " (" + domain + ")"
 		}
 		meta := fmt.Sprintf("   %d points by %s | %d comments", story.Score, story.By, story.Descendants)
+		if t.readIDs[story.ID] {
+			meta += " | read"
+		}
 		if t.savedIDs[story.ID] {
 			meta += " | saved"
 		}
@@ -949,7 +960,11 @@ func (t Top) listView(width, height int) string {
 			b.WriteString(selectedStyle.Render(padLine(title, width)) + "\n")
 			b.WriteString(selectedStyle.Render(padLine(truncateScreen(meta, width), width)) + "\n")
 		} else {
-			b.WriteString("  " + truncateScreen(line, maxScreen(0, width-2)) + "\n")
+			title := "  " + truncateScreen(line, maxScreen(0, width-2))
+			if t.readIDs[story.ID] {
+				title = readStyle.Render(title)
+			}
+			b.WriteString(title + "\n")
 			b.WriteString(metaStyle.Render(truncateScreen(meta, width)) + "\n")
 		}
 		if i < end-1 {
@@ -963,13 +978,13 @@ func (t Top) listView(width, height int) string {
 	var footer string
 	switch {
 	case t.searchQuery != "" && sortLabel != "":
-		footer = fmt.Sprintf("%d loaded | sort: %s | %d matches | o cycle sort | / edit search | ctrl+u clear | enter read | s save", loadedCount, sortLabel, len(matches))
+		footer = fmt.Sprintf("%d loaded | sort: %s | %d matches | O sort | h hide read | / edit search | ctrl+u clear | enter read | o open | s save", loadedCount, sortLabel, len(matches))
 	case t.searchQuery != "":
-		footer = fmt.Sprintf("%d loaded | %d matches | / edit search | ctrl+u clear | o sort | enter read | s save", loadedCount, len(matches))
+		footer = fmt.Sprintf("%d loaded | %d matches | / edit search | ctrl+u clear | O sort | h hide read | enter read | o open | s save", loadedCount, len(matches))
 	case sortLabel != "":
-		footer = fmt.Sprintf("%d loaded | sort: %s | showing %d-%d of %d | o cycle sort | / search | enter read | s save", loadedCount, sortLabel, t.listTop+1, end, len(matches))
+		footer = fmt.Sprintf("%d loaded | sort: %s | showing %d-%d of %d | O sort | h hide read | / search | enter read | o open | s save", loadedCount, sortLabel, t.listTop+1, end, len(matches))
 	default:
-		footer = fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | o sort | n/p next/prev 100 | j/k scroll | enter read | s save | y copy url | r refresh", t.page+1, t.pageCount(), matches[t.listTop].index+1, matches[end-1].index+1, len(t.storyIDs))
+		footer = fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | O sort | h hide read | left/right page | j/k move | enter read | o open | s save | y copy | r refresh", t.page+1, t.pageCount(), matches[t.listTop].index+1, matches[end-1].index+1, len(t.storyIDs))
 	}
 	b.WriteString(truncateScreen(footer, width))
 	return b.String()

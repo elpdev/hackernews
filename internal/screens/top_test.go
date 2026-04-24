@@ -300,6 +300,30 @@ func TestListViewShowsFilteredResults(t *testing.T) {
 	}
 }
 
+func TestListViewShowsReadStories(t *testing.T) {
+	top := topWithStories()
+	top.readIDs[2] = true
+
+	view := ansi.Strip(top.listView(80, 12))
+	if !strings.Contains(view, "Rust story") || !strings.Contains(view, "read") {
+		t.Fatalf("expected read story indicator in %q", view)
+	}
+}
+
+func TestHideReadFiltersReadStories(t *testing.T) {
+	top := topWithStories()
+	top.readIDs[2] = true
+	top.hideRead = true
+
+	view := ansi.Strip(top.listView(80, 12))
+	if strings.Contains(view, "Rust story") {
+		t.Fatalf("did not expect read story while hide-read is enabled: %q", view)
+	}
+	if !strings.Contains(view, "hiding read") {
+		t.Fatalf("expected hide-read status in %q", view)
+	}
+}
+
 func TestSearchKeysEditQueryAndPreserveFilterOnEscape(t *testing.T) {
 	top := topWithStories()
 	top.searching = true
