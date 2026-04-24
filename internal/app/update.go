@@ -78,6 +78,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	active := m.screens[m.activeScreen]
+	if capturer, ok := active.(screens.KeyCapturer); ok && capturer.CapturesKey(msg) {
+		updated, cmd := active.Update(msg)
+		m.screens[m.activeScreen] = updated
+		return m, cmd
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Commands):
 		m.showCommandPalette = true
@@ -106,7 +113,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleSidebarKey(msg)
 	}
 
-	active := m.screens[m.activeScreen]
+	active = m.screens[m.activeScreen]
 	updated, cmd := active.Update(msg)
 	m.screens[m.activeScreen] = updated
 	return m, cmd

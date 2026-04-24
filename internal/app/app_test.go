@@ -57,6 +57,20 @@ func TestCommandPaletteThemeSelectionConfirmsPreview(t *testing.T) {
 	}
 }
 
+func TestCapturedScreenKeyBypassesGlobalQuit(t *testing.T) {
+	model := New(BuildInfo{Version: "test", Commit: "none", Date: "unknown"})
+	model = sendKey(t, model, tea.Key{Text: "/", Code: '/'})
+
+	updated, cmd := model.Update(keyPress(tea.Key{Text: "q", Code: 'q'}))
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected q to be captured by search instead of quitting")
+	}
+	if model.showHelp {
+		t.Fatal("did not expect captured key to trigger global UI")
+	}
+}
+
 func openThemePalette(t *testing.T, model Model) Model {
 	t.Helper()
 	model = sendKey(t, model, tea.Key{Code: 'k', Mod: tea.ModCtrl})

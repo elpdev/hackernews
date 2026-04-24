@@ -50,6 +50,14 @@ type Top struct {
 	readLine int
 	loading  string
 	err      string
+
+	searching   bool
+	searchQuery string
+}
+
+type storyListItem struct {
+	index int
+	story hn.Item
 }
 
 type topStoriesLoadedMsg struct {
@@ -175,10 +183,16 @@ func (t Top) KeyBindings() []key.Binding {
 		key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
 		key.NewBinding(key.WithKeys("left", "p"), key.WithHelp("left/p", "prev 100")),
 		key.NewBinding(key.WithKeys("right", "n"), key.WithHelp("right/n", "next 100")),
+		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear search")),
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	}
+}
+
+func (t Top) CapturesKey(msg tea.KeyPressMsg) bool {
+	return t.searching && t.readID == 0 && msg.String() != "ctrl+c"
 }
 
 func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
@@ -207,15 +221,29 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return t, nil
 	}
 
+	if t.searching {
+		return t.handleSearchKey(msg)
+	}
+
 	switch msg.String() {
 	case "r":
 		t.loading = "Loading top stories..."
 		t.err = ""
 		return t, t.loadStories()
-	}
-	if len(t.stories) == 0 {
+	case "/":
+		t.searching = true
+		return t, nil
+	case "ctrl+u":
+		t.searchQuery = ""
+		t.selected = 0
+		t.listTop = 0
 		return t, nil
 	}
+	matches := t.filteredStories()
+	if len(matches) == 0 {
+		return t, nil
+	}
+	t.selected = clampIndex(t.selected, len(matches))
 
 	switch msg.String() {
 	case "left", "p":
@@ -231,7 +259,7 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			t.selected--
 		}
 	case "down", "j":
-		if t.selected < len(t.stories)-1 {
+		if t.selected < len(matches)-1 {
 			t.selected++
 		}
 	case "pgup":
@@ -241,14 +269,14 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		}
 	case "pgdown":
 		t.selected += 10
-		if t.selected >= len(t.stories) {
-			t.selected = len(t.stories) - 1
+		if t.selected >= len(matches) {
+			t.selected = len(matches) - 1
 		}
 	case "enter":
 		if t.loading != "" {
 			return t, nil
 		}
-		story := t.stories[t.selected]
+		story := matches[t.selected].story
 		if article, ok := t.articles[story.ID]; ok {
 			t.readID = story.ID
 			t.readTop = 0
@@ -258,6 +286,37 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		t.loading = "Fetching article..."
 		t.err = ""
 		return t, t.loadArticle(story)
+	}
+	return t, nil
+}
+
+func (t Top) handleSearchKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		t.searching = false
+		return t, nil
+	case "ctrl+u":
+		t.searchQuery = ""
+		t.selected = 0
+		t.listTop = 0
+		return t, nil
+	case "backspace", "ctrl+h":
+		if len(t.searchQuery) > 0 {
+			t.searchQuery = t.searchQuery[:len(t.searchQuery)-1]
+			t.selected = 0
+			t.listTop = 0
+		}
+		return t, nil
+	case "space":
+		t.searchQuery += " "
+		t.selected = 0
+		t.listTop = 0
+		return t, nil
+	}
+	if len(msg.String()) == 1 {
+		t.searchQuery += msg.String()
+		t.selected = 0
+		t.listTop = 0
 	}
 	return t, nil
 }
@@ -411,32 +470,84 @@ func (t Top) listView(width, height int) string {
 		}
 		return b.String()
 	}
+	if t.searching || t.searchQuery != "" {
+		label := "Filter"
+		if t.searching {
+			label = "Search"
+		}
+		query := t.searchQuery
+		if query == "" {
+			query = lipgloss.NewStyle().Faint(true).Render("type to filter...")
+		}
+		b.WriteString(truncateScreen(label+": "+query, width) + "\n")
+	}
 
-	selectedInPage := t.selected
-	listHeight := maxScreen(1, (height-4)/2)
+	matches := t.filteredStories()
+	if len(matches) == 0 {
+		b.WriteString(fmt.Sprintf("No stories match %q. Press ctrl+u to clear.\n", t.searchQuery))
+		return b.String()
+	}
+	selectedInPage := clampIndex(t.selected, len(matches))
+	listHeight := maxScreen(1, (height-3)/3)
+	if t.searching || t.searchQuery != "" {
+		listHeight = maxScreen(1, (height-4)/3)
+	}
 	if selectedInPage < t.listTop {
 		t.listTop = selectedInPage
 	}
 	if selectedInPage >= t.listTop+listHeight {
 		t.listTop = selectedInPage - listHeight + 1
 	}
-	end := minScreen(len(t.stories), t.listTop+listHeight)
+	end := minScreen(len(matches), t.listTop+listHeight)
+	metaStyle := lipgloss.NewStyle().Faint(true)
+	selectedStyle := lipgloss.NewStyle().Bold(true).Reverse(true)
 	for i := t.listTop; i < end; i++ {
-		story := t.stories[i]
-		line := fmt.Sprintf("%2d. %s", t.page*topStoriesPerPage+i+1, story.Title)
+		item := matches[i]
+		story := item.story
+		line := fmt.Sprintf("%2d. %s", t.page*topStoriesPerPage+item.index+1, story.Title)
 		if domain := storyDomain(story.URL); domain != "" {
 			line += " (" + domain + ")"
 		}
-		meta := fmt.Sprintf("    %d points by %s | %d comments", story.Score, story.By, story.Descendants)
-		if i == t.selected {
-			b.WriteString(lipgloss.NewStyle().Bold(true).Render("> "+truncateScreen(line, maxScreen(0, width-2))) + "\n")
+		meta := fmt.Sprintf("     %d points by %s | %d comments", story.Score, story.By, story.Descendants)
+		if i == selectedInPage {
+			title := "> " + truncateScreen(line, maxScreen(0, width-2))
+			b.WriteString(selectedStyle.Render(padLine(title, width)) + "\n")
+			b.WriteString(selectedStyle.Render(padLine(truncateScreen(meta, width), width)) + "\n")
 		} else {
 			b.WriteString("  " + truncateScreen(line, maxScreen(0, width-2)) + "\n")
+			b.WriteString(metaStyle.Render(truncateScreen(meta, width)) + "\n")
 		}
-		b.WriteString(truncateScreen(meta, width) + "\n")
+		if i < end-1 {
+			b.WriteString("\n")
+		}
 	}
-	b.WriteString(truncateScreen(fmt.Sprintf("Page %d/%d | showing %d-%d of %d | n/p next/prev 100 | j/k scroll | enter read | r refresh", t.page+1, t.pageCount(), t.page*topStoriesPerPage+t.listTop+1, t.page*topStoriesPerPage+end, len(t.storyIDs)), width))
+	footer := fmt.Sprintf("Page %d/%d | showing %d-%d of %d | / search | n/p next/prev 100 | j/k scroll | enter read | r refresh", t.page+1, t.pageCount(), t.page*topStoriesPerPage+matches[t.listTop].index+1, t.page*topStoriesPerPage+matches[end-1].index+1, len(t.storyIDs))
+	if t.searchQuery != "" {
+		footer = fmt.Sprintf("Page %d/%d | %d matches on page | / edit search | ctrl+u clear | enter read", t.page+1, t.pageCount(), len(matches))
+	}
+	b.WriteString(truncateScreen(footer, width))
 	return b.String()
+}
+
+func (t Top) filteredStories() []storyListItem {
+	query := strings.ToLower(strings.TrimSpace(t.searchQuery))
+	items := make([]storyListItem, 0, len(t.stories))
+	for i, story := range t.stories {
+		if query == "" || storyMatchesQuery(story, query) {
+			items = append(items, storyListItem{index: i, story: story})
+		}
+	}
+	return items
+}
+
+func storyMatchesQuery(story hn.Item, query string) bool {
+	fields := []string{story.Title, story.By, story.URL, storyDomain(story.URL)}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t Top) articleView(width, height int) string {
@@ -577,13 +688,20 @@ func renderArticle(article articles.Article, image articleImage, width int) stri
 	if block := articleImageBlock(article, image, width); block != "" {
 		sections = append(sections, block)
 	}
+	hasMeta := false
 	if meta := articleMeta(article); meta != "" {
 		sections = append(sections, renderMarkdown("> "+meta+"\n", width))
+		hasMeta = true
 	}
-	if strings.TrimSpace(article.Markdown) != "" {
+	hasBody := strings.TrimSpace(article.Markdown) != ""
+	if hasBody {
 		sections = append(sections, renderMarkdown(article.Markdown, width))
 	}
-	return strings.Join(trimRenderedSections(sections), "\n")
+	trimmed := trimRenderedSections(sections)
+	if hasMeta && hasBody && len(trimmed) >= 2 {
+		return strings.Join(trimmed[:len(trimmed)-1], "\n") + "\n\n" + trimmed[len(trimmed)-1]
+	}
+	return strings.Join(trimmed, "\n")
 }
 
 func articleImageBlock(article articles.Article, image articleImage, width int) string {
