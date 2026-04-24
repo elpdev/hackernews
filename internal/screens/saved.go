@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/elpdev/hackernews/internal/articles"
 	"github.com/elpdev/hackernews/internal/browser"
 	"github.com/elpdev/hackernews/internal/clipboard"
 	"github.com/elpdev/hackernews/internal/media"
@@ -18,17 +19,18 @@ import (
 )
 
 type Saved struct {
-	store    saved.Store
-	opener   func(string) error
-	copier   func(string) error
-	items    []saved.Article
-	selected int
-	listTop  int
-	readID   int
-	readLine int
-	loading  string
-	err      string
-	status   string
+	store     saved.Store
+	extractor articles.Extractor
+	opener    func(string) error
+	copier    func(string) error
+	items     []saved.Article
+	selected  int
+	listTop   int
+	readID    int
+	readLine  int
+	loading   string
+	err       string
+	status    string
 
 	searching   bool
 	searchQuery string
@@ -87,8 +89,17 @@ type savedArticleTagsUpdatedMsg struct {
 
 func (m savedArticleTagsUpdatedMsg) TargetScreenID() string { return m.screenID }
 
+type savedArticleExtractedMsg struct {
+	screenID string
+	id       int
+	article  articles.Article
+	err      error
+}
+
+func (m savedArticleExtractedMsg) TargetScreenID() string { return m.screenID }
+
 func NewSaved(store saved.Store) Saved {
-	return Saved{store: store, opener: browser.Open, copier: clipboard.Copy, loading: "Loading saved articles..."}
+	return Saved{store: store, extractor: articles.NewTrafilaturaExtractor(), opener: browser.Open, copier: clipboard.Copy, loading: "Loading saved articles..."}
 }
 
 func (s Saved) Init() tea.Cmd { return s.load() }
@@ -131,6 +142,23 @@ func (s Saved) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 		}
 		s.status = "Tags updated"
+		return s, nil
+	case savedArticleExtractedMsg:
+		s.loading = ""
+		if msg.err != nil {
+			s.status = "Could not extract saved article: " + msg.err.Error()
+			return s, nil
+		}
+		for i := range s.items {
+			if s.items[i].ID == msg.id {
+				s.items[i].Article = msg.article
+				break
+			}
+		}
+		clearArticleRenderCache(msg.id)
+		s.readID = msg.id
+		s.readLine = 0
+		s.status = "Article extracted"
 		return s, nil
 	case tea.KeyPressMsg:
 		return s.handleKey(msg)
@@ -281,7 +309,13 @@ func (s Saved) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			s.selected = len(matches) - 1
 		}
 	case "enter":
-		s.readID = matches[s.selected].item.ID
+		item := matches[s.selected].item
+		if strings.TrimSpace(item.Article.Markdown) == "" {
+			s.loading = "Fetching saved article..."
+			s.status = ""
+			return s, s.extractSavedArticle(item)
+		}
+		s.readID = item.ID
 		s.readLine = 0
 	case "s", "d":
 		return s, s.delete(matches[s.selected].item.ID)
@@ -402,6 +436,57 @@ func (s Saved) setTags(id int, tags []string) tea.Cmd {
 		defer cancel()
 		return savedArticleTagsUpdatedMsg{screenID: "saved", id: id, tags: tags, err: s.store.SetTags(ctx, id, tags)}
 	}
+}
+
+func (s Saved) extractSavedArticle(item saved.Article) tea.Cmd {
+	if s.store == nil {
+		return func() tea.Msg {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: fmt.Errorf("saved article store is unavailable")}
+		}
+	}
+	if s.extractor == nil {
+		return func() tea.Msg {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: fmt.Errorf("article extractor is unavailable")}
+		}
+	}
+	return func() tea.Msg {
+		article, err := extractArticleForSaved(s.extractor, item)
+		if err != nil {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.store.Save(ctx, item.Story, article); err != nil {
+			return savedArticleExtractedMsg{screenID: "saved", id: item.ID, err: err}
+		}
+		return savedArticleExtractedMsg{screenID: "saved", id: item.ID, article: article}
+	}
+}
+
+func extractArticleForSaved(extractor articles.Extractor, item saved.Article) (articles.Article, error) {
+	if strings.TrimSpace(item.Story.URL) == "" && strings.TrimSpace(item.Article.URL) == "" {
+		return articles.Article{
+			Title:    savedTitle(item),
+			Author:   item.Story.By,
+			URL:      savedArticleURL(item),
+			Markdown: hnTextMarkdown(item.Story),
+		}, nil
+	}
+	url := item.Article.URL
+	if strings.TrimSpace(url) == "" {
+		url = item.Story.URL
+	}
+	article, err := extractor.Extract(url)
+	if article.Title == "" {
+		article.Title = savedTitle(item)
+	}
+	if article.Author == "" {
+		article.Author = item.Story.By
+	}
+	if strings.TrimSpace(article.URL) == "" {
+		article.URL = url
+	}
+	return article, err
 }
 
 func (s Saved) listView(width, height int) string {

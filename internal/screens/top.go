@@ -159,6 +159,7 @@ func (m savedIDsLoadedMsg) TargetScreenID() string { return m.screenID }
 type articleSavedToggledMsg struct {
 	screenID string
 	id       int
+	article  articles.Article
 	saved    bool
 	err      error
 }
@@ -296,6 +297,7 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		t.savedIDs = msg.ids
 		return t, nil
 	case articleSavedToggledMsg:
+		t.loading = ""
 		if msg.err != nil {
 			t.status = "Could not update saved article: " + msg.err.Error()
 			return t, nil
@@ -305,6 +307,9 @@ func (t Top) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		if msg.saved {
 			t.savedIDs[msg.id] = true
+			if strings.TrimSpace(msg.article.Markdown) != "" {
+				t.articles[msg.id] = msg.article
+			}
 			t.status = "Article saved"
 		} else {
 			delete(t.savedIDs, msg.id)
@@ -534,6 +539,11 @@ func (t Top) handleKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			return OpenCommentsMsg{Story: story, ReturnTo: t.screenID()}
 		}
 	case "s":
+		story := matches[t.selected].story
+		if !t.savedIDs[story.ID] && !t.hasExtractedArticle(story) {
+			t.loading = "Fetching article to save..."
+			t.err = ""
+		}
 		return t, t.toggleSaved(matches[t.selected].story.ID)
 	case "y":
 		t.status = t.copyArticleURL(t.articleURLForStory(matches[t.selected].story))
@@ -678,13 +688,30 @@ func (t Top) toggleSaved(id int) tea.Cmd {
 	article := t.articleForStory(story)
 	alreadySaved := t.savedIDs[id]
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if alreadySaved {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 			return articleSavedToggledMsg{screenID: screenID, id: id, saved: false, err: t.saved.Delete(ctx, id)}
 		}
-		return articleSavedToggledMsg{screenID: screenID, id: id, saved: true, err: t.saved.Save(ctx, story, article)}
+		if !t.hasExtractedArticle(story) {
+			var err error
+			article, err = t.extractArticleForStory(story)
+			if err != nil {
+				return articleSavedToggledMsg{screenID: screenID, id: id, err: err}
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return articleSavedToggledMsg{screenID: screenID, id: id, article: article, saved: true, err: t.saved.Save(ctx, story, article)}
 	}
+}
+
+func (t Top) hasExtractedArticle(story hn.Item) bool {
+	article, ok := t.articles[story.ID]
+	if ok && strings.TrimSpace(article.Markdown) != "" {
+		return true
+	}
+	return strings.TrimSpace(story.URL) == "" || strings.TrimSpace(story.Text) != ""
 }
 
 func (t Top) storyByID(id int) (hn.Item, bool) {
@@ -793,26 +820,31 @@ func (t Top) copyArticleURL(url string) string {
 func (t Top) loadArticle(story hn.Item) tea.Cmd {
 	screenID := t.screenID()
 	return func() tea.Msg {
-		if strings.TrimSpace(story.URL) == "" {
-			return articleLoadedMsg{screenID: screenID, id: story.ID, article: articles.Article{
-				Title:    story.Title,
-				Author:   story.By,
-				URL:      fmt.Sprintf("https://news.ycombinator.com/item?id=%d", story.ID),
-				Markdown: hnTextMarkdown(story),
-			}}
-		}
-		article, err := t.extractor.Extract(story.URL)
-		if article.Title == "" {
-			article.Title = story.Title
-		}
-		if article.Author == "" {
-			article.Author = story.By
-		}
-		if strings.TrimSpace(article.URL) == "" {
-			article.URL = story.URL
-		}
+		article, err := t.extractArticleForStory(story)
 		return articleLoadedMsg{screenID: screenID, id: story.ID, article: article, err: err}
 	}
+}
+
+func (t Top) extractArticleForStory(story hn.Item) (articles.Article, error) {
+	if strings.TrimSpace(story.URL) == "" {
+		return articles.Article{
+			Title:    story.Title,
+			Author:   story.By,
+			URL:      fmt.Sprintf("https://news.ycombinator.com/item?id=%d", story.ID),
+			Markdown: hnTextMarkdown(story),
+		}, nil
+	}
+	article, err := t.extractor.Extract(story.URL)
+	if article.Title == "" {
+		article.Title = story.Title
+	}
+	if article.Author == "" {
+		article.Author = story.By
+	}
+	if strings.TrimSpace(article.URL) == "" {
+		article.URL = story.URL
+	}
+	return article, err
 }
 
 func (t Top) startArticleImageLoad(id int, article articles.Article) (Top, tea.Cmd) {
