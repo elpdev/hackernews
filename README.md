@@ -209,4 +209,4 @@ The publish workflow can also create a version tag, run GoReleaser, and publish 
 
 ## Notes
 
-Article extraction currently expects the Python extraction script from this repository to be present alongside the source tree. Running from source with `go run ./cmd/hackernews` is the most reliable way to use the in-terminal article reader during development.
+Article extraction runs through an embedded Python helper script and requires the `python3` interpreter used by the app to have the `trafilatura` package installed.
