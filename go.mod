@@ -9,7 +9,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/elpdev/tuipalette v0.2.0
+	github.com/elpdev/tuipalette v0.3.0
 	github.com/elpdev/tuitheme v0.1.0
 	golang.org/x/image v0.39.0
 )
