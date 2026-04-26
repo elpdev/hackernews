@@ -42,8 +42,8 @@ github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxK
 github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/elpdev/tuimod v0.0.0-20260426033227-d6e4a4e0adc6 h1:gwJrKpbs3ibzpBEH7f/d/8QwFMqndnfz7hjkMlzdUns=
 github.com/elpdev/tuimod v0.0.0-20260426033227-d6e4a4e0adc6/go.mod h1:2tr3ih75MDdOHMzptplTuvM4R191aOlKjw6Y4vkCoZw=
-github.com/elpdev/tuipalette v0.1.0 h1:UDDdYxnOoYGjCaqjfBuCdKmhNlM0Hdred0VIzX2T/EQ=
-github.com/elpdev/tuipalette v0.1.0/go.mod h1:YOsgh2HfFdKcKdiat69RGSMXawW+LkBqKSlq5Djkcxo=
+github.com/elpdev/tuipalette v0.2.0 h1:WmxM4I2MR2de3y9TKyhb6px+FTtyC1kvgeDbVSZtG6I=
+github.com/elpdev/tuipalette v0.2.0/go.mod h1:YOsgh2HfFdKcKdiat69RGSMXawW+LkBqKSlq5Djkcxo=
 github.com/gorilla/css v1.0.1 h1:ntNaBIghp6JmvWnxbZKANoLyuXTPZ4cAMlo6RyhlbO8=
 github.com/gorilla/css v1.0.1/go.mod h1:BvnYkspnSzMmwRK+b8/xgNPLiIuNZr6vbZBTPQ2A3b0=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
