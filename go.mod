@@ -14,6 +14,8 @@ require (
 	golang.org/x/image v0.39.0
 )
 
+require github.com/elpdev/tuilayout v0.1.0
+
 require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
