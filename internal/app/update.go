@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
+	hackernews "github.com/elpdev/hackernews"
 	hnsync "github.com/elpdev/hackernews/internal/sync"
 	"github.com/elpdev/hackernews/pkg/commands"
 	"github.com/elpdev/hackernews/pkg/config"
@@ -109,13 +110,7 @@ func (m Model) refreshSearchScreen() Model {
 	if !ok {
 		return m
 	}
-	var items []screens.StorySnapshot
-	for _, screen := range m.screens {
-		if stories, ok := screen.(screens.Top); ok {
-			items = append(items, stories.Snapshot()...)
-		}
-	}
-	m.screens["search"] = search.WithItems(items)
+	m.screens["search"] = hackernews.RefreshSearchScreen(m.screens, search)
 	return m
 }
 
