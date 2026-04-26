@@ -5,14 +5,14 @@ import (
 	"sort"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/elpdev/hackernews/internal/commands"
-	"github.com/elpdev/hackernews/internal/config"
 	"github.com/elpdev/hackernews/internal/debug"
-	"github.com/elpdev/hackernews/internal/history"
-	"github.com/elpdev/hackernews/internal/hn"
-	"github.com/elpdev/hackernews/internal/saved"
-	"github.com/elpdev/hackernews/internal/screens"
-	"github.com/elpdev/hackernews/internal/theme"
+	"github.com/elpdev/hackernews/pkg/commands"
+	"github.com/elpdev/hackernews/pkg/config"
+	"github.com/elpdev/hackernews/pkg/history"
+	"github.com/elpdev/hackernews/pkg/hn"
+	"github.com/elpdev/hackernews/pkg/saved"
+	"github.com/elpdev/hackernews/pkg/screens"
+	"github.com/elpdev/hackernews/pkg/theme"
 )
 
 const defaultScreen = "top"

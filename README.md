@@ -213,10 +213,13 @@ The main packages are:
 | --- | --- |
 | `cmd/hackernews` | CLI entrypoint and version flag |
 | `internal/app` | Root Bubble Tea model, routing, global keys, commands |
-| `internal/screens` | Feed, reader, comments, and saved screens |
-| `internal/hn` | Hacker News API client and item types |
-| `internal/articles` | Trafilatura article extraction |
-| `internal/saved` | Local saved article store |
+| `pkg/screens` | Importable feed, reader, comments, and saved screens |
+| `pkg/hn` | Hacker News API client and item types |
+| `pkg/articles` | Trafilatura article extraction |
+| `pkg/saved` | Local saved article store |
+| `pkg/history` | Local read history store |
+| `pkg/theme` | Importable theme definitions and styles |
+| `pkg/commands` | Command registry and command palette model |
 | `internal/browser` | System browser integration |
 | `internal/clipboard` | Clipboard integration |
 

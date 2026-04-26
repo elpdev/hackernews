@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/elpdev/hackernews/internal/theme"
+	"github.com/elpdev/hackernews/pkg/theme"
 )
 
 type Item struct {

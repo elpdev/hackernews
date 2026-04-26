@@ -3,7 +3,7 @@ package footer
 import (
 	"strings"
 
-	"github.com/elpdev/hackernews/internal/theme"
+	"github.com/elpdev/hackernews/pkg/theme"
 	"github.com/charmbracelet/bubbles/key"
 )
 

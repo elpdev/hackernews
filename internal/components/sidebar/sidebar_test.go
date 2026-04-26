@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/elpdev/hackernews/internal/theme"
+	"github.com/elpdev/hackernews/pkg/theme"
 )
 
 func TestInactiveTopStoriesDoesNotWrap(t *testing.T) {

@@ -33,12 +33,13 @@ Be careful mixing Bubble Tea v1 and v2 types. Some Bubbles components may still 
 
 - `cmd/hackernews`: CLI entrypoint, flags, version metadata, program startup. Rename this package path and binary when adapting the template.
 - `internal/app`: root Bubble Tea model, routing, global update/view wiring, keybindings, app messages.
-- `internal/commands`: command registry and command palette model.
 - `internal/components`: reusable shell UI pieces such as header, sidebar, footer, and modal overlays.
 - `internal/debug`: in-memory event log.
 - `internal/layout`: terminal size and region calculations.
-- `internal/screens`: modular screens implementing the shared `Screen` interface.
-- `internal/theme`: semantic theme and style definitions.
+- `pkg/commands`: importable command registry and command palette model.
+- `pkg/screens`: importable modular screens implementing the shared `Screen` interface.
+- `pkg/theme`: importable semantic theme and style definitions.
+- `pkg/hn`, `pkg/articles`, `pkg/saved`, `pkg/history`, `pkg/config`: importable Hacker News domain, storage, and settings packages.
 
 Keep package responsibilities narrow. The root app can coordinate global state, but feature-specific update and rendering should stay in dedicated screens or packages.
 
@@ -46,7 +47,7 @@ Keep package responsibilities narrow. The root app can coordinate global state, 
 
 When adding a first-class screen:
 
-- Add a screen type in `internal/screens` or in a feature package that implements `screens.Screen`.
+- Add a screen type in `pkg/screens` or in a feature package that implements `screens.Screen`.
 - Register it in `internal/app/app.go`.
 - Add a command palette command if users should be able to open it quickly.
 - Add it to sidebar navigation if it is part of the primary app flow.
@@ -54,14 +55,14 @@ When adding a first-class screen:
 
 When adding a product action:
 
-- Prefer a command in `internal/commands` registered from `internal/app/app.go`.
+- Prefer a command in `pkg/commands` registered from `internal/app/app.go`.
 - Commands should return Bubble Tea commands that emit app messages.
 - Log important user-visible or debugging events through `internal/debug.Log`.
 
 When adding layout or styling:
 
 - Put terminal dimension calculations in `internal/layout`.
-- Put reusable styles and colors in `internal/theme`.
+- Put reusable styles and colors in `pkg/theme`.
 - Prefer semantic style names over raw colors scattered through screens.
 
 ## UI Expectations

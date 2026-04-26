@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/elpdev/hackernews/internal/screens"
+	"github.com/elpdev/hackernews/pkg/screens"
 )
 
 func TestSwitchScreenForTest(t *testing.T) {

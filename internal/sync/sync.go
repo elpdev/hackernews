@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elpdev/hackernews/internal/history"
-	"github.com/elpdev/hackernews/internal/saved"
+	"github.com/elpdev/hackernews/pkg/history"
+	"github.com/elpdev/hackernews/pkg/saved"
 )
 
 const fileMode = 0o600

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elpdev/hackernews/internal/config"
-	"github.com/elpdev/hackernews/internal/history"
-	"github.com/elpdev/hackernews/internal/saved"
+	"github.com/elpdev/hackernews/pkg/config"
+	"github.com/elpdev/hackernews/pkg/history"
+	"github.com/elpdev/hackernews/pkg/saved"
 )
 
 type Status int

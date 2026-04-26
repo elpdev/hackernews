@@ -8,10 +8,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/elpdev/hackernews/internal/commands"
-	"github.com/elpdev/hackernews/internal/config"
-	"github.com/elpdev/hackernews/internal/screens"
 	hnsync "github.com/elpdev/hackernews/internal/sync"
+	"github.com/elpdev/hackernews/pkg/commands"
+	"github.com/elpdev/hackernews/pkg/config"
+	"github.com/elpdev/hackernews/pkg/screens"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

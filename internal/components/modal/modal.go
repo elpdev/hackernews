@@ -1,7 +1,7 @@
 package modal
 
 import (
-	"github.com/elpdev/hackernews/internal/theme"
+	"github.com/elpdev/hackernews/pkg/theme"
 	"charm.land/lipgloss/v2"
 )
 

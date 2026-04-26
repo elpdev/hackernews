@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elpdev/hackernews/internal/articles"
-	"github.com/elpdev/hackernews/internal/history"
-	"github.com/elpdev/hackernews/internal/hn"
-	"github.com/elpdev/hackernews/internal/saved"
+	"github.com/elpdev/hackernews/pkg/articles"
+	"github.com/elpdev/hackernews/pkg/history"
+	"github.com/elpdev/hackernews/pkg/hn"
+	"github.com/elpdev/hackernews/pkg/saved"
 )
 
 func TestMergeHistoryKeepsEarliestAndLatestReads(t *testing.T) {
