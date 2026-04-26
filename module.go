@@ -9,6 +9,7 @@ import (
 	"github.com/elpdev/hackernews/pkg/saved"
 	"github.com/elpdev/hackernews/pkg/screens"
 	"github.com/elpdev/hackernews/pkg/theme"
+	"github.com/elpdev/tuimod"
 )
 
 const DefaultScreenID = "top"
@@ -26,22 +27,11 @@ type Module struct {
 	settings config.Settings
 }
 
-type ScreenSpec struct {
-	ID      string
-	Screen  screens.Screen
-	Sidebar bool
-	Order   int
-}
+type ScreenSpec = tuimod.ScreenSpec
 
-type CommandSpec struct {
-	ID          string
-	ParentID    string
-	Title       string
-	Description string
-	Keywords    []string
-	Order       int
-	ScreenID    string
-}
+type CommandSpec = tuimod.CommandSpec
+
+func (m Module) ID() string { return "hackernews" }
 
 func New(options Options) Module {
 	settings := normalizeSettings(options.Settings)
@@ -98,8 +88,8 @@ func (m Module) ScreenSpecs() []ScreenSpec {
 	return append([]ScreenSpec(nil), m.screens...)
 }
 
-func (m Module) Screens() map[string]screens.Screen {
-	out := make(map[string]screens.Screen, len(m.screens))
+func (m Module) Screens() map[string]tuimod.Screen {
+	out := make(map[string]tuimod.Screen, len(m.screens))
 	for _, spec := range m.screens {
 		out[spec.ID] = spec.Screen
 	}

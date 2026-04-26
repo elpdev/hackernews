@@ -3,6 +3,7 @@ package screens
 import (
 	"github.com/elpdev/hackernews/pkg/config"
 	"github.com/elpdev/hackernews/pkg/hn"
+	"github.com/elpdev/tuimod"
 )
 
 // OpenCommentsMsg is emitted by a stories screen to request drilling into a
@@ -33,6 +34,4 @@ type SettingsChangedMsg struct {
 
 // TargetedMsg identifies async results that should be delivered to the screen
 // that started the work, even if another screen is active when they complete.
-type TargetedMsg interface {
-	TargetScreenID() string
-}
+type TargetedMsg = tuimod.TargetedMsg
